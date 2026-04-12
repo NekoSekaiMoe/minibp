@@ -180,7 +180,6 @@ func main() {
 	defer out.Close()
 
 	// Calculate relative path from output dir to source dir
-	cwd, _ := os.Getwd()
 	absOutFile, _ := filepath.Abs(*outFile)
 	absBuildDir := filepath.Dir(absOutFile)
 	absSourceDir, _ := filepath.Abs(srcDir)

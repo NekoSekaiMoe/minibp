@@ -52,6 +52,36 @@ func getListProp(m *parser.Module, name string) []string {
 	return nil
 }
 
+// getCflags extracts cflags from a module
+func getCflags(m *parser.Module) string {
+	return formatFlags(getListProp(m, "cflags"))
+}
+
+// getCppflags extracts cppflags from a module
+func getCppflags(m *parser.Module) string {
+	return formatFlags(getListProp(m, "cppflags"))
+}
+
+// getLdflags extracts ldflags from a module
+func getLdflags(m *parser.Module) string {
+	return formatFlags(getListProp(m, "ldflags"))
+}
+
+// getGoflags extracts goflags from a module
+func getGoflags(m *parser.Module) string {
+	return formatFlags(getListProp(m, "goflags"))
+}
+
+// getJavaflags extracts javaflags from a module
+func getJavaflags(m *parser.Module) string {
+	return formatFlags(getListProp(m, "javaflags"))
+}
+
+// formatFlags formats a list of flags as a space-separated string
+func formatFlags(flags []string) string {
+	return strings.Join(flags, " ")
+}
+
 // getName returns the 'name' property of a module
 func getName(m *parser.Module) string {
 	return getStringProp(m, "name")
@@ -101,13 +131,16 @@ func (r *ccLibrary) NinjaEdge(m *parser.Module) string {
 	var edges strings.Builder
 	objFiles := make([]string, 0, len(srcs))
 
+	// Extract flags
+	cflags := getCflags(m)
+
 	// Generate compile edges for each source file
 	for _, src := range srcs {
 		obj := strings.TrimSuffix(src, ".c")
 		obj = strings.TrimSuffix(obj, ".cc")
 		obj += ".o"
 		objFiles = append(objFiles, obj)
-		edges.WriteString(fmt.Sprintf("build %s: cc_compile %s\n", obj, src))
+		edges.WriteString(fmt.Sprintf("build %s: cc_compile %s\n flags = %s\n", obj, src, cflags))
 	}
 
 	// Generate archive edge
@@ -145,8 +178,163 @@ func (r *ccBinary) NinjaEdge(m *parser.Module) string {
 		return ""
 	}
 
+	cflags := getCflags(m)
+	ldflags := getLdflags(m)
+	allFlags := cflags
+	if ldflags != "" {
+		if allFlags != "" {
+			allFlags += " "
+		}
+		allFlags += ldflags
+	}
+
+	var edges strings.Builder
+	objFiles := make([]string, 0, len(srcs))
+
+	// Generate compile edges for each source file
+	for _, src := range srcs {
+		obj := strings.TrimSuffix(src, ".c")
+		obj += ".o"
+		objFiles = append(objFiles, obj)
+		edges.WriteString(fmt.Sprintf("build %s: cc_compile %s\n flags = %s\n", obj, src, cflags))
+	}
+
+	// Generate link edge
 	out := r.Outputs(m)[0]
-	return fmt.Sprintf("build %s: cc_link %s\n", out, formatSrcs(srcs))
+	edges.WriteString(fmt.Sprintf("build %s: cc_link %s\n flags = %s\n", out, strings.Join(objFiles, " "), allFlags))
+
+	return edges.String()
+}
+
+// cppLibrary implements the cpp_library rule
+// Same as cc_library but uses g++ compiler
+
+type cppLibrary struct{}
+
+func (r *cppLibrary) Name() string {
+	return "cpp_library"
+}
+
+func (r *cppLibrary) NinjaRule() string {
+	return `rule cpp_compile
+ command = g++ -c $in -o $out $flags
+
+rule cpp_archive
+ command = ar rcs $out $in
+`
+}
+
+func (r *cppLibrary) Outputs(m *parser.Module) []string {
+	name := getName(m)
+	if name == "" {
+		return nil
+	}
+	return []string{fmt.Sprintf("lib%s.a", name)}
+}
+
+func (r *cppLibrary) NinjaEdge(m *parser.Module) string {
+	name := getName(m)
+	srcs := getSrcs(m)
+	if name == "" || len(srcs) == 0 {
+		return ""
+	}
+
+	var edges strings.Builder
+	objFiles := make([]string, 0, len(srcs))
+
+	// Extract flags
+	cflags := getCflags(m)
+	cppflags := getCppflags(m)
+	allFlags := cflags
+	if cppflags != "" {
+		if allFlags != "" {
+			allFlags += " "
+		}
+		allFlags += cppflags
+	}
+
+	// Generate compile edges for each source file
+	for _, src := range srcs {
+		obj := strings.TrimSuffix(src, ".cpp")
+		obj = strings.TrimSuffix(obj, ".cc")
+		obj = strings.TrimSuffix(obj, ".cxx")
+		obj += ".o"
+		objFiles = append(objFiles, obj)
+		edges.WriteString(fmt.Sprintf("build %s: cpp_compile %s\n flags = %s\n", obj, src, allFlags))
+	}
+
+	// Generate archive edge
+	out := r.Outputs(m)[0]
+	edges.WriteString(fmt.Sprintf("build %s: cpp_archive %s\n", out, strings.Join(objFiles, " ")))
+
+	return edges.String()
+}
+
+// cppBinary implements the cpp_binary rule
+// Same as cc_binary but uses g++ compiler
+
+type cppBinary struct{}
+
+func (r *cppBinary) Name() string {
+	return "cpp_binary"
+}
+
+func (r *cppBinary) NinjaRule() string {
+	return `rule cpp_link
+ command = g++ -o $out $in $flags
+`
+}
+
+func (r *cppBinary) Outputs(m *parser.Module) []string {
+	name := getName(m)
+	if name == "" {
+		return nil
+	}
+	return []string{name}
+}
+
+func (r *cppBinary) NinjaEdge(m *parser.Module) string {
+	name := getName(m)
+	srcs := getSrcs(m)
+	if name == "" || len(srcs) == 0 {
+		return ""
+	}
+
+	cflags := getCflags(m)
+	cppflags := getCppflags(m)
+	ldflags := getLdflags(m)
+	allFlags := cflags
+	if cppflags != "" {
+		if allFlags != "" {
+			allFlags += " "
+		}
+		allFlags += cppflags
+	}
+	if ldflags != "" {
+		if allFlags != "" {
+			allFlags += " "
+		}
+		allFlags += ldflags
+	}
+
+	var edges strings.Builder
+	objFiles := make([]string, 0, len(srcs))
+
+	// Generate compile edges for each source file
+	for _, src := range srcs {
+		obj := strings.TrimSuffix(src, ".cpp")
+		obj = strings.TrimSuffix(obj, ".cc")
+		obj = strings.TrimSuffix(obj, ".cxx")
+		obj += ".o"
+		objFiles = append(objFiles, obj)
+		edges.WriteString(fmt.Sprintf("build %s: cpp_compile %s\n flags = %s\n", obj, src, allFlags))
+	}
+
+	// Generate link edge
+	out := r.Outputs(m)[0]
+	edges.WriteString(fmt.Sprintf("build %s: cpp_link %s\n flags = %s\n", out, strings.Join(objFiles, " "), ldflags))
+
+	return edges.String()
 }
 
 // goLibrary implements the go_library rule
@@ -177,8 +365,9 @@ func (r *goLibrary) NinjaEdge(m *parser.Module) string {
 		return ""
 	}
 
+	goflags := getGoflags(m)
 	out := r.Outputs(m)[0]
-	return fmt.Sprintf("build %s: go_build_archive %s\n", out, formatSrcs(srcs))
+	return fmt.Sprintf("build %s: go_build_archive %s\n flags = %s\n", out, formatSrcs(srcs), goflags)
 }
 
 // goBinary implements the go_binary rule
@@ -209,8 +398,9 @@ func (r *goBinary) NinjaEdge(m *parser.Module) string {
 		return ""
 	}
 
+	goflags := getGoflags(m)
 	out := r.Outputs(m)[0]
-	return fmt.Sprintf("build %s: go_build %s\n", out, formatSrcs(srcs))
+	return fmt.Sprintf("build %s: go_build %s\n flags = %s\n", out, formatSrcs(srcs), goflags)
 }
 
 // javaLibrary implements the java_library rule
@@ -221,11 +411,11 @@ func (r *javaLibrary) Name() string {
 }
 
 func (r *javaLibrary) NinjaRule() string {
-	return `rule javac
-    command = javac -d $outdir $in
+	return `rule javac_lib
+ command = javac -d $outdir $in $flags
 
 rule jar_create
-    command = jar cf $out -C $outdir .
+ command = jar cf $out -C $outdir .
 `
 }
 
@@ -244,9 +434,21 @@ func (r *javaLibrary) NinjaEdge(m *parser.Module) string {
 		return ""
 	}
 
+	javaflags := getJavaflags(m)
 	out := r.Outputs(m)[0]
 	outdir := name + "_classes"
-	return fmt.Sprintf("build %s: jar_create %s\n    outdir = %s\n", out, formatSrcs(srcs), outdir)
+
+	var edges strings.Builder
+
+	// Generate compile edges for each source file (creates .class files in outdir)
+	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_lib %s\n outdir = %s\n flags = %s\n",
+		name, formatSrcs(srcs), outdir, javaflags))
+
+	// Generate jar edge (depends on compile output)
+	edges.WriteString(fmt.Sprintf("build %s: jar_create %s.stamp\n outdir = %s\n",
+		out, name, outdir))
+
+	return edges.String()
 }
 
 // javaBinary implements the java_binary rule
@@ -258,10 +460,10 @@ func (r *javaBinary) Name() string {
 
 func (r *javaBinary) NinjaRule() string {
 	return `rule javac_bin
-    command = javac -d $outdir $in
+ command = javac -d $outdir $in $flags
 
 rule jar_create_executable
-    command = jar cfe $out $main_class -C $outdir .
+ command = jar cfe $out $main_class -C $outdir .
 `
 }
 
@@ -281,10 +483,21 @@ func (r *javaBinary) NinjaEdge(m *parser.Module) string {
 		return ""
 	}
 
+	javaflags := getJavaflags(m)
 	out := r.Outputs(m)[0]
 	outdir := name + "_classes"
-	return fmt.Sprintf("build %s: jar_create_executable %s\n    outdir = %s\n    main_class = %s\n",
-		out, formatSrcs(srcs), outdir, mainClass)
+
+	var edges strings.Builder
+
+	// Generate compile edges for each source file
+	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_bin %s\n outdir = %s\n flags = %s\n",
+		name, formatSrcs(srcs), outdir, javaflags))
+
+	// Generate jar edge (depends on compile output)
+	edges.WriteString(fmt.Sprintf("build %s: jar_create_executable %s.stamp\n outdir = %s\n main_class = %s\n",
+		out, name, outdir, mainClass))
+
+	return edges.String()
 }
 
 // customRule implements the custom rule
@@ -333,6 +546,8 @@ func GetAllRules() []BuildRule {
 	return []BuildRule{
 		&ccLibrary{},
 		&ccBinary{},
+		&cppLibrary{},
+		&cppBinary{},
 		&goLibrary{},
 		&goBinary{},
 		&javaLibrary{},
