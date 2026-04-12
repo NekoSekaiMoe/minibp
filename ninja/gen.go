@@ -54,24 +54,58 @@ func (g *Generator) SetPathPrefix(prefix string) {
 
 // getRelativePath returns the path from outputDir to a file in sourceDir
 func (g *Generator) getRelativePath(file string) string {
-	// If source and output are the same, return file as-is
 	if g.sourceDir == g.outputDir {
 		return file
 	}
-
-	// Make paths absolute for reliable comparison
 	absSource, _ := filepath.Abs(g.sourceDir)
 	absOutput, _ := filepath.Abs(g.outputDir)
-
-	// If output is inside source, calculate relative path
 	if rel, err := filepath.Rel(absOutput, absSource); err == nil {
 		if rel == "." {
 			return file
 		}
 		return filepath.Join(rel, file)
 	}
-
 	return file
+}
+
+// collectIncludePaths recursively collects export_include_dirs from dependencies
+func (g *Generator) collectIncludePaths(moduleName string, visited map[string]bool) []string {
+	if visited[moduleName] {
+		return nil
+	}
+	visited[moduleName] = true
+
+	m, ok := g.modules[moduleName]
+	if !ok || m == nil {
+		return nil
+	}
+
+	var includes []string
+	seen := make(map[string]bool)
+
+	// Get direct export_include_dirs
+	dirs := getExportIncludeDirs(m)
+	for _, dir := range dirs {
+		if !seen[dir] {
+			includes = append(includes, dir)
+			seen[dir] = true
+		}
+	}
+
+	// Recursively collect from dependencies (option B: transitive)
+	deps := getListProp(m, "deps")
+	for _, dep := range deps {
+		depName := strings.TrimPrefix(dep, ":")
+		depIncludes := g.collectIncludePaths(depName, visited)
+		for _, dir := range depIncludes {
+			if !seen[dir] {
+				includes = append(includes, dir)
+				seen[dir] = true
+			}
+		}
+	}
+
+	return includes
 }
 
 // Generate writes the ninja build file content to the provided writer
@@ -106,7 +140,7 @@ func (g *Generator) Generate(w io.Writer) error {
 	// Set environment variable to signal path adjustment
 	os.Setenv("MINIBP_SOURCE_PREFIX", g.getRelativePath(""))
 
-	// For each module, write build edge
+	// For each module, write build edge with desc
 	for _, level := range levels {
 		for _, moduleName := range level {
 			m, ok := g.modules[moduleName]
@@ -119,15 +153,73 @@ func (g *Generator) Generate(w io.Writer) error {
 				continue
 			}
 
-			// Write build edge with adjusted paths
-			edgeDef := g.adjustPaths(rule.NinjaEdge(m))
-			if edgeDef != "" {
-				fmt.Fprint(w, edgeDef)
+			// Collect include paths for this module
+			visited := make(map[string]bool)
+			includes := g.collectIncludePaths(moduleName, visited)
+
+			// Get source directory for desc
+			sourceDir := g.sourceDir
+			if sourceDir == "." {
+				absPath, _ := filepath.Abs(g.sourceDir)
+				sourceDir = filepath.Base(absPath)
 			}
+
+			// Get module edge output
+			edgeDef := rule.NinjaEdge(m)
+			if edgeDef == "" {
+				continue
+			}
+
+			// Add includes to edge if needed
+			edgeDef = g.addIncludesToEdge(edgeDef, includes)
+
+			// Parse edge to extract source files for desc
+			srcs := getSrcs(m)
+			if len(srcs) == 0 {
+				// No source files, write single desc
+				desc := rule.Desc(m, "")
+				if desc != "" {
+					nw.Desc(sourceDir, moduleName, desc, "")
+				}
+			} else {
+				// Write desc for each source file
+				for _, src := range srcs {
+					desc := rule.Desc(m, src)
+					if desc != "" {
+						nw.Desc(sourceDir, moduleName, desc, src)
+					}
+				}
+			}
+
+			// Write build edge with adjusted paths
+			fmt.Fprint(w, g.adjustPaths(edgeDef))
 		}
 	}
 
 	return nil
+}
+
+// addIncludesToEdge adds include directories to compile commands
+func (g *Generator) addIncludesToEdge(edge string, includes []string) string {
+	if len(includes) == 0 {
+		return edge
+	}
+
+	includeFlags := ""
+	for _, inc := range includes {
+		includeFlags += " -I" + inc
+	}
+
+	// Add to flags variable in edge
+	lines := strings.Split(edge, "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "flags =") && !strings.Contains(line, "#") {
+			// Append includes to existing flags
+			lines[i] = line + includeFlags
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // adjustPaths updates paths in ninja edge to be relative to output directory
@@ -136,17 +228,10 @@ func (g *Generator) adjustPaths(edge string) string {
 		return edge
 	}
 
-	// Simple string replacement to prepend prefix to file paths
-	// Format in ninja: "build output: rule input1 input2"
-	// We need to prepend prefix to input files
-	// Parse line: "build libdag.a: go_build_archive dag/graph.go"
-	// Extract file paths after the rule name
-
 	if !strings.HasPrefix(edge, "build ") {
 		return edge
 	}
 
-	// Split into parts
 	parts := strings.SplitN(edge, "\n", 2)
 	buildLine := parts[0]
 	rest := ""
@@ -154,35 +239,27 @@ func (g *Generator) adjustPaths(edge string) string {
 		rest = parts[1]
 	}
 
-	// Find where rule name ends and inputs start
-	// Format: "build output: rule input1 input2"
 	re := strings.SplitN(buildLine, ": ", 2)
 	if len(re) < 2 {
 		return edge
 	}
 
-	// re[0] = "build libdag.a"
-	// re[1] = "go_build_archive dag/graph.go"
 	colonPart := re[0] + ": "
 	ruleAndInputs := re[1]
 
-	// Split rule name from inputs
 	fields := strings.Fields(ruleAndInputs)
 	if len(fields) < 2 {
 		return edge
 	}
 
-	ruleName := fields[0]
 	inputs := fields[1:]
-
-	// Prepend prefix to inputs (skip variables starting with $)
 	for i, input := range inputs {
 		if !strings.HasPrefix(input, "$") {
 			inputs[i] = g.pathPrefix + input
 		}
 	}
 
-	return colonPart + ruleName + " " + strings.Join(inputs, " ") + "\n" + rest
+	return colonPart + fields[0] + " " + strings.Join(inputs, " ") + "\n" + rest
 }
 
 // collectUsedRules returns a deduplicated list of rule names used by modules

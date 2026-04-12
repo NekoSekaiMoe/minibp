@@ -67,13 +67,15 @@ func getListProp(m *parser.Module, name string) []string {
 	return nil
 }
 
-func getCflags(m *parser.Module) string { return strings.Join(getListProp(m, "cflags"), " ") }
-func getCppflags(m *parser.Module) string { return strings.Join(getListProp(m, "cppflags"), " ") }
-func getLdflags(m *parser.Module) string { return strings.Join(getListProp(m, "ldflags"), " ") }
-func getGoflags(m *parser.Module) string { return strings.Join(getListProp(m, "goflags"), " ") }
-func getJavaflags(m *parser.Module) string { return strings.Join(getListProp(m, "javaflags"), " ") }
-func getName(m *parser.Module) string { return getStringProp(m, "name") }
-func getSrcs(m *parser.Module) []string { return getListProp(m, "srcs") }
+func getCflags(m *parser.Module) string              { return strings.Join(getListProp(m, "cflags"), " ") }
+func getCppflags(m *parser.Module) string            { return strings.Join(getListProp(m, "cppflags"), " ") }
+func getLdflags(m *parser.Module) string             { return strings.Join(getListProp(m, "ldflags"), " ") }
+func getGoflags(m *parser.Module) string             { return strings.Join(getListProp(m, "goflags"), " ") }
+func getJavaflags(m *parser.Module) string           { return strings.Join(getListProp(m, "javaflags"), " ") }
+func getExportIncludeDirs(m *parser.Module) []string { return getListProp(m, "export_include_dirs") }
+func getName(m *parser.Module) string                { return getStringProp(m, "name") }
+func getSrcs(m *parser.Module) []string              { return getListProp(m, "srcs") }
+func formatSrcs(srcs []string) string                { return strings.Join(srcs, " ") }
 
 // ============================================================================
 // cc_library - C library (static by default, shared if shared: true)
@@ -810,10 +812,10 @@ func (r *javaImport) Desc(m *parser.Module, srcFile string) string { return "cp"
 // ============================================================================
 type filegroup struct{}
 
-func (r *filegroup) Name() string { return "filegroup" }
-func (r *filegroup) NinjaRule() string { return "" }
-func (r *filegroup) Outputs(m *parser.Module) []string { return nil }
-func (r *filegroup) NinjaEdge(m *parser.Module) string { return "" }
+func (r *filegroup) Name() string                                 { return "filegroup" }
+func (r *filegroup) NinjaRule() string                            { return "" }
+func (r *filegroup) Outputs(m *parser.Module) []string            { return nil }
+func (r *filegroup) NinjaEdge(m *parser.Module) string            { return "" }
 func (r *filegroup) Desc(m *parser.Module, srcFile string) string { return "filegroup" }
 
 // ============================================================================
