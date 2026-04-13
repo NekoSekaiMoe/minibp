@@ -5,11 +5,24 @@
 // C/C++ Modules
 // ============================================================================
 
+// C header library
+cc_library_headers {
+    name: "libutil-headers",
+    export_include_dirs: ["."],
+}
+
 // C static library
 cc_library {
     name: "libutil",
     srcs: ["util.c", "helper.c"],
     cflags: ["-Wall", "-O2"],
+    header_libs: [":libutil-headers"],
+}
+
+// C++ header library
+cc_library_headers {
+    name: "libcore-headers",
+    export_include_dirs: ["."],
 }
 
 // C++ static library
@@ -17,6 +30,7 @@ cpp_library {
     name: "libcore",
     srcs: ["core.cpp", "utils.cpp"],
     cflags: ["-std=c++17", "-Wall"],
+    header_libs: [":libcore-headers"],
 }
 
 // C binary executable

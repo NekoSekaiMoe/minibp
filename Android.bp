@@ -65,7 +65,7 @@ go_library {
 }
 
 // Test binary for parser
-go_binary {
+go_test {
     name: "test_parser",
     srcs: [
         "parser/parser_test.go",
@@ -76,7 +76,7 @@ go_binary {
 }
 
 // Test binary for DAG
-go_binary {
+go_test {
     name: "test_dag",
     srcs: [
         "dag/graph_test.go",
@@ -89,7 +89,7 @@ go_binary {
 }
 
 // Test binary for ninja
-go_binary {
+go_test {
     name: "test_ninja",
     srcs: [
         "ninja/ninja_test.go",
@@ -103,7 +103,7 @@ go_binary {
 }
 
 // Test binary for module
-go_binary {
+go_test {
     name: "test_module",
     srcs: [
         "module/module_test.go",

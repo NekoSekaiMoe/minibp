@@ -83,6 +83,17 @@ func (g *Generator) collectIncludePaths(moduleName string, visited map[string]bo
 	var includes []string
 	seen := make(map[string]bool)
 
+	// Check if this is a cc_library_headers module
+	if m.Type == "cc_library_headers" {
+		dirs := getExportIncludeDirs(m)
+		for _, dir := range dirs {
+			if !seen[dir] {
+				includes = append(includes, dir)
+				seen[dir] = true
+			}
+		}
+	}
+
 	// Get direct export_include_dirs
 	dirs := getExportIncludeDirs(m)
 	for _, dir := range dirs {
@@ -92,7 +103,20 @@ func (g *Generator) collectIncludePaths(moduleName string, visited map[string]bo
 		}
 	}
 
-	// Recursively collect from dependencies (option B: transitive)
+	// Collect from header_libs (cc_library_headers dependencies)
+	headerLibs := getListProp(m, "header_libs")
+	for _, dep := range headerLibs {
+		depName := strings.TrimPrefix(dep, ":")
+		depIncludes := g.collectIncludePaths(depName, visited)
+		for _, dir := range depIncludes {
+			if !seen[dir] {
+				includes = append(includes, dir)
+				seen[dir] = true
+			}
+		}
+	}
+
+	// Recursively collect from deps (option B: transitive)
 	deps := getListProp(m, "deps")
 	for _, dep := range deps {
 		depName := strings.TrimPrefix(dep, ":")
@@ -181,6 +205,25 @@ func (g *Generator) Generate(w io.Writer) error {
 			visited := make(map[string]bool)
 			includes := g.collectIncludePaths(moduleName, visited)
 
+			// For cc/cpp modules, add source file directories as include paths
+			if strings.HasPrefix(m.Type, "cc_") || strings.HasPrefix(m.Type, "cpp_") {
+				seen := make(map[string]bool)
+				for _, inc := range includes {
+					seen[inc] = true
+				}
+				if !seen["."] {
+					includes = append(includes, ".")
+				}
+				srcs := getSrcs(m)
+				for _, src := range srcs {
+					dir := filepath.Dir(src)
+					if dir != "." && !seen[dir] {
+						includes = append(includes, dir)
+						seen[dir] = true
+					}
+				}
+			}
+
 			// Get source directory for desc
 			sourceDir := g.sourceDir
 			if sourceDir == "." {
@@ -190,12 +233,14 @@ func (g *Generator) Generate(w io.Writer) error {
 
 			// Get module edge output
 			edgeDef := rule.NinjaEdge(m)
-			if edgeDef == "" {
+			if edgeDef == "" && m.Type != "cc_library_headers" {
 				continue
 			}
 
 			// Add includes to edge if needed
-			edgeDef = g.addIncludesToEdge(edgeDef, includes)
+			if edgeDef != "" {
+				edgeDef = g.addIncludesToEdge(edgeDef, includes)
+			}
 
 			// Parse edge to extract source files for desc
 			srcs := getSrcs(m)
@@ -230,7 +275,11 @@ func (g *Generator) addIncludesToEdge(edge string, includes []string) string {
 	}
 
 	includeFlags := ""
+	relPrefix := g.getRelativePath("")
 	for _, inc := range includes {
+		if relPrefix != "" && relPrefix != "." {
+			inc = filepath.Join(relPrefix, inc)
+		}
 		includeFlags += " -I" + inc
 	}
 
@@ -252,42 +301,48 @@ func (g *Generator) adjustPaths(edge string) string {
 		return edge
 	}
 
-	if !strings.HasPrefix(edge, "build ") {
-		return edge
-	}
+	lines := strings.Split(edge, "\n")
+	var adjustedLines []string
 
-	parts := strings.SplitN(edge, "\n", 2)
-	buildLine := parts[0]
-	rest := ""
-	if len(parts) > 1 {
-		rest = parts[1]
-	}
-
-	re := strings.SplitN(buildLine, ": ", 2)
-	if len(re) < 2 {
-		return edge
-	}
-
-	colonPart := re[0] + ": "
-	ruleAndInputs := re[1]
-
-	fields := strings.Fields(ruleAndInputs)
-	if len(fields) < 2 {
-		return edge
-	}
-
-	inputs := fields[1:]
-	for i, input := range inputs {
-		// Skip variables and paths that already have the prefix or are absolute
-		if !strings.HasPrefix(input, "$") &&
-			!strings.HasPrefix(input, g.pathPrefix) &&
-			!strings.HasPrefix(input, "/") &&
-			!strings.HasPrefix(input, "..") {
-			inputs[i] = g.pathPrefix + input
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "build ") {
+			adjustedLines = append(adjustedLines, line)
+			continue
 		}
+
+		re := strings.SplitN(line, ": ", 2)
+		if len(re) < 2 {
+			adjustedLines = append(adjustedLines, line)
+			continue
+		}
+
+		colonPart := re[0] + ": "
+		ruleAndInputs := re[1]
+
+		fields := strings.Fields(ruleAndInputs)
+		if len(fields) < 2 {
+			adjustedLines = append(adjustedLines, line)
+			continue
+		}
+
+		inputs := fields[1:]
+		for i, input := range inputs {
+			if !strings.HasPrefix(input, "$") &&
+				!strings.HasPrefix(input, g.pathPrefix) &&
+				!strings.HasPrefix(input, "/") &&
+				!strings.HasPrefix(input, "..") &&
+				!strings.HasSuffix(input, ".o") &&
+				!strings.HasSuffix(input, ".a") &&
+				!strings.HasSuffix(input, ".so") &&
+				!strings.HasSuffix(input, ".stamp") {
+				inputs[i] = g.pathPrefix + input
+			}
+		}
+
+		adjustedLines = append(adjustedLines, colonPart+fields[0]+" "+strings.Join(inputs, " "))
 	}
 
-	return colonPart + fields[0] + " " + strings.Join(inputs, " ") + "\n" + rest
+	return strings.Join(adjustedLines, "\n")
 }
 
 // collectUsedModuleTypes returns a deduplicated list of module types used

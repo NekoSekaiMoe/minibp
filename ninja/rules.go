@@ -912,10 +912,29 @@ func (r *customRule) NinjaEdge(m *parser.Module) string {
 func (r *customRule) Desc(m *parser.Module, srcFile string) string { return "custom" }
 
 // GetAllRules returns all available rule implementations
+// ============================================================================
+// cc_library_headers - Header library (exports headers for other modules)
+// ============================================================================
+type ccLibraryHeaders struct{}
+
+func (r *ccLibraryHeaders) Name() string      { return "cc_library_headers" }
+func (r *ccLibraryHeaders) NinjaRule() string { return "" }
+func (r *ccLibraryHeaders) Outputs(m *parser.Module) []string {
+	name := getName(m)
+	if name == "" {
+		return nil
+	}
+	return []string{name + ".h"}
+}
+func (r *ccLibraryHeaders) NinjaEdge(m *parser.Module) string {
+	return ""
+}
+func (r *ccLibraryHeaders) Desc(m *parser.Module, srcFile string) string { return "" }
+
 func GetAllRules() []BuildRule {
 	return []BuildRule{
 		&ccLibrary{}, &ccLibraryStatic{}, &ccLibraryShared{}, &ccObject{}, &ccBinary{},
-		&cppLibrary{}, &cppBinary{},
+		&cppLibrary{}, &cppBinary{}, &ccLibraryHeaders{},
 		&goLibrary{}, &goBinary{}, &goTest{},
 		&javaLibrary{}, &javaLibraryStatic{}, &javaLibraryHost{}, &javaBinary{}, &javaBinaryHost{}, &javaTest{}, &javaImport{},
 		&filegroup{}, &customRule{},
