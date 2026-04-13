@@ -73,9 +73,35 @@ func getLdflags(m *parser.Module) string             { return strings.Join(getLi
 func getGoflags(m *parser.Module) string             { return strings.Join(getListProp(m, "goflags"), " ") }
 func getJavaflags(m *parser.Module) string           { return strings.Join(getListProp(m, "javaflags"), " ") }
 func getExportIncludeDirs(m *parser.Module) []string { return getListProp(m, "export_include_dirs") }
+func getExportedHeaders(m *parser.Module) []string   { return getListProp(m, "exported_headers") }
 func getName(m *parser.Module) string                { return getStringProp(m, "name") }
 func getSrcs(m *parser.Module) []string              { return getListProp(m, "srcs") }
 func formatSrcs(srcs []string) string                { return strings.Join(srcs, " ") }
+
+func getCC() string {
+	if v := os.Getenv("MINIBP_CC"); v != "" {
+		return v
+	}
+	return "gcc"
+}
+
+func getCXX() string {
+	if v := os.Getenv("MINIBP_CXX"); v != "" {
+		return v
+	}
+	return "g++"
+}
+
+func getAR() string {
+	if v := os.Getenv("MINIBP_AR"); v != "" {
+		return v
+	}
+	return "ar"
+}
+
+func getArchSuffix() string {
+	return os.Getenv("MINIBP_ARCH_SUFFIX")
+}
 
 // ============================================================================
 // cc_library - C library (static by default, shared if shared: true)
@@ -84,13 +110,13 @@ type ccLibrary struct{}
 
 func (r *ccLibrary) Name() string { return "cc_library" }
 func (r *ccLibrary) NinjaRule() string {
-	return `rule cc_compile
- command = gcc -c $in -o $out $flags
+	return fmt.Sprintf(`rule cc_compile
+ command = %s -c $in -o $out $flags
 rule cc_archive
- command = ar rcs $out $in
+ command = %s rcs $out $in
 rule cc_shared
- command = gcc -shared -o $out $in $flags
-`
+ command = %s -shared -o $out $in $flags
+`, getCC(), getAR(), getCC())
 }
 
 func (r *ccLibrary) Outputs(m *parser.Module) []string {
@@ -98,10 +124,11 @@ func (r *ccLibrary) Outputs(m *parser.Module) []string {
 	if name == "" {
 		return nil
 	}
+	suffix := getArchSuffix()
 	if getBoolProp(m, "shared") {
-		return []string{fmt.Sprintf("lib%s.so", name)}
+		return []string{fmt.Sprintf("lib%s%s.so", name, suffix)}
 	}
-	return []string{fmt.Sprintf("lib%s.a", name)}
+	return []string{fmt.Sprintf("lib%s%s.a", name, suffix)}
 }
 
 func (r *ccLibrary) NinjaEdge(m *parser.Module) string {
@@ -112,6 +139,14 @@ func (r *ccLibrary) NinjaEdge(m *parser.Module) string {
 	}
 	shared := getBoolProp(m, "shared")
 	cflags := getCflags(m)
+	ldflags := getLdflags(m)
+	sharedLibs := getListProp(m, "shared_libs")
+	if shared && len(sharedLibs) > 0 {
+		for _, dep := range sharedLibs {
+			depName := strings.TrimPrefix(dep, ":")
+			ldflags += " -l" + depName
+		}
+	}
 	var edges strings.Builder
 	var objFiles []string
 
@@ -127,7 +162,7 @@ func (r *ccLibrary) NinjaEdge(m *parser.Module) string {
 
 	out := r.Outputs(m)[0]
 	if shared {
-		edges.WriteString(fmt.Sprintf("build %s: cc_shared %s\n flags = %s\n", out, strings.Join(objFiles, " "), getLdflags(m)))
+		edges.WriteString(fmt.Sprintf("build %s: cc_shared %s\n flags = %s\n", out, strings.Join(objFiles, " "), ldflags))
 	} else {
 		edges.WriteString(fmt.Sprintf("build %s: cc_archive %s\n", out, strings.Join(objFiles, " ")))
 	}
@@ -151,18 +186,18 @@ type ccLibraryStatic struct{}
 
 func (r *ccLibraryStatic) Name() string { return "cc_library_static" }
 func (r *ccLibraryStatic) NinjaRule() string {
-	return `rule cc_compile
- command = gcc -c $in -o $out $flags
+	return fmt.Sprintf(`rule cc_compile
+ command = %s -c $in -o $out $flags
 rule cc_archive
- command = ar rcs $out $in
-`
+ command = %s rcs $out $in
+`, getCC(), getAR())
 }
 func (r *ccLibraryStatic) Outputs(m *parser.Module) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
-	return []string{fmt.Sprintf("lib%s.a", name)}
+	return []string{fmt.Sprintf("lib%s%s.a", name, getArchSuffix())}
 }
 func (r *ccLibraryStatic) NinjaEdge(m *parser.Module) string {
 	name := getName(m)
@@ -199,18 +234,18 @@ type ccLibraryShared struct{}
 
 func (r *ccLibraryShared) Name() string { return "cc_library_shared" }
 func (r *ccLibraryShared) NinjaRule() string {
-	return `rule cc_compile
- command = gcc -c $in -o $out $flags
+	return fmt.Sprintf(`rule cc_compile
+ command = %s -c $in -o $out $flags
 rule cc_shared
- command = gcc -shared -o $out $in $flags
-`
+ command = %s -shared -o $out $in $flags
+`, getCC(), getCC())
 }
 func (r *ccLibraryShared) Outputs(m *parser.Module) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
-	return []string{fmt.Sprintf("lib%s.so", name)}
+	return []string{fmt.Sprintf("lib%s%s.so", name, getArchSuffix())}
 }
 func (r *ccLibraryShared) NinjaEdge(m *parser.Module) string {
 	name := getName(m)
@@ -248,16 +283,16 @@ type ccObject struct{}
 
 func (r *ccObject) Name() string { return "cc_object" }
 func (r *ccObject) NinjaRule() string {
-	return `rule cc_compile
- command = gcc -c $in -o $out $flags
-`
+	return fmt.Sprintf(`rule cc_compile
+ command = %s -c $in -o $out $flags
+`, getCC())
 }
 func (r *ccObject) Outputs(m *parser.Module) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
-	return []string{fmt.Sprintf("%s.o", name)}
+	return []string{fmt.Sprintf("%s%s.o", name, getArchSuffix())}
 }
 func (r *ccObject) NinjaEdge(m *parser.Module) string {
 	name := getName(m)
@@ -278,30 +313,32 @@ type ccBinary struct{}
 
 func (r *ccBinary) Name() string { return "cc_binary" }
 func (r *ccBinary) NinjaRule() string {
-	return `rule cc_compile
- command = gcc -c $in -o $out $flags
+	return fmt.Sprintf(`rule cc_compile
+ command = %s -c $in -o $out $flags
 rule cc_link
- command = gcc -o $out $in $flags
-`
+ command = %s -o $out $in $flags
+`, getCC(), getCC())
 }
 func (r *ccBinary) Outputs(m *parser.Module) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
-	return []string{name}
+	return []string{name + getArchSuffix()}
 }
 func getLibOutputName(name string) string {
-	if strings.HasPrefix(name, "lib") {
-		return "lib" + name + ".a"
-	}
-	return "lib" + name + ".a"
+	return "lib" + name + getArchSuffix() + ".a"
+}
+
+func getSharedLibOutputName(name string) string {
+	return "lib" + name + getArchSuffix() + ".so"
 }
 
 func (r *ccBinary) NinjaEdge(m *parser.Module) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	deps := getListProp(m, "deps")
+	sharedLibs := getListProp(m, "shared_libs")
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
@@ -318,6 +355,11 @@ func (r *ccBinary) NinjaEdge(m *parser.Module) string {
 	for _, dep := range deps {
 		depName := strings.TrimPrefix(dep, ":")
 		libFiles = append(libFiles, getLibOutputName(depName))
+	}
+	for _, dep := range sharedLibs {
+		depName := strings.TrimPrefix(dep, ":")
+		libFiles = append(libFiles, getSharedLibOutputName(depName))
+		allFlags += " -l" + depName
 	}
 	var edges strings.Builder
 	var objFiles []string
@@ -346,23 +388,24 @@ type cppLibrary struct{}
 
 func (r *cppLibrary) Name() string { return "cpp_library" }
 func (r *cppLibrary) NinjaRule() string {
-	return `rule cpp_compile
- command = g++ -c $in -o $out $flags
+	return fmt.Sprintf(`rule cpp_compile
+ command = %s -c $in -o $out $flags
 rule cpp_archive
- command = ar rcs $out $in
+ command = %s rcs $out $in
 rule cpp_shared
- command = g++ -shared -o $out $in $flags
-`
+ command = %s -shared -o $out $in $flags
+`, getCXX(), getAR(), getCXX())
 }
 func (r *cppLibrary) Outputs(m *parser.Module) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
+	suffix := getArchSuffix()
 	if getBoolProp(m, "shared") {
-		return []string{fmt.Sprintf("lib%s.so", name)}
+		return []string{fmt.Sprintf("lib%s%s.so", name, suffix)}
 	}
-	return []string{fmt.Sprintf("lib%s.a", name)}
+	return []string{fmt.Sprintf("lib%s%s.a", name, suffix)}
 }
 func (r *cppLibrary) NinjaEdge(m *parser.Module) string {
 	name := getName(m)
@@ -416,23 +459,24 @@ type cppBinary struct{}
 
 func (r *cppBinary) Name() string { return "cpp_binary" }
 func (r *cppBinary) NinjaRule() string {
-	return `rule cpp_compile
- command = g++ -c $in -o $out $flags
+	return fmt.Sprintf(`rule cpp_compile
+ command = %s -c $in -o $out $flags
 rule cpp_link
- command = g++ -o $out $in $flags
-`
+ command = %s -o $out $in $flags
+`, getCXX(), getCXX())
 }
 func (r *cppBinary) Outputs(m *parser.Module) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
-	return []string{name}
+	return []string{name + getArchSuffix()}
 }
 func (r *cppBinary) NinjaEdge(m *parser.Module) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	deps := getListProp(m, "deps")
+	sharedLibs := getListProp(m, "shared_libs")
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
@@ -450,6 +494,11 @@ func (r *cppBinary) NinjaEdge(m *parser.Module) string {
 	for _, dep := range deps {
 		depName := strings.TrimPrefix(dep, ":")
 		libFiles = append(libFiles, getLibOutputName(depName))
+	}
+	for _, dep := range sharedLibs {
+		depName := strings.TrimPrefix(dep, ":")
+		libFiles = append(libFiles, getSharedLibOutputName(depName))
+		allFlags += " -l" + depName
 	}
 	var edges strings.Builder
 	var objFiles []string

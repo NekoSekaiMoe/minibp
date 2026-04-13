@@ -449,3 +449,111 @@ func TestParseAssignmentWithPlusEqual(t *testing.T) {
 		t.Errorf("Expected assigner '+=', got '%s'", assign.Assigner)
 	}
 }
+
+func TestParseArchBlock(t *testing.T) {
+	input := `cc_library {
+    name: "libfoo",
+    srcs: ["foo.c"],
+    arch: {
+        arm: {
+            srcs: ["foo_arm.S"],
+            cflags: ["-DARM"],
+        },
+        arm64: {
+            cflags: ["-DARM64"],
+        },
+    },
+}`
+
+	p := NewParser(strings.NewReader(input), "test.bp")
+	file, errs := p.Parse()
+
+	if len(errs) > 0 {
+		t.Fatalf("Parse errors: %v", errs)
+	}
+
+	if len(file.Defs) != 1 {
+		t.Fatalf("Expected 1 definition, got %d", len(file.Defs))
+	}
+
+	mod := file.Defs[0].(*Module)
+	if mod.Arch == nil {
+		t.Fatal("Expected module.Arch to be non-nil")
+	}
+
+	if len(mod.Arch) != 2 {
+		t.Fatalf("Expected 2 arch entries, got %d", len(mod.Arch))
+	}
+
+	armProps, ok := mod.Arch["arm"]
+	if !ok {
+		t.Fatal("Missing 'arm' arch entry")
+	}
+	if len(armProps.Properties) != 2 {
+		t.Errorf("Expected 2 arm properties, got %d", len(armProps.Properties))
+	}
+
+	// arch should be extracted from main properties
+	for _, prop := range mod.Map.Properties {
+		if prop.Name == "arch" {
+			t.Error("'arch' should not be in main properties after extraction")
+		}
+	}
+}
+
+func TestParseExportedHeaders(t *testing.T) {
+	input := `cc_library {
+    name: "libfoo",
+    srcs: ["foo.c"],
+    exported_headers: ["include/foo.h", "include/bar.h"],
+}`
+
+	p := NewParser(strings.NewReader(input), "test.bp")
+	file, errs := p.Parse()
+
+	if len(errs) > 0 {
+		t.Fatalf("Parse errors: %v", errs)
+	}
+
+	mod := file.Defs[0].(*Module)
+	prop := findProperty(mod.Map, "exported_headers")
+	if prop == nil {
+		t.Fatal("Missing 'exported_headers' property")
+	}
+	list, ok := prop.Value.(*List)
+	if !ok {
+		t.Fatalf("Expected *List, got %T", prop.Value)
+	}
+	if len(list.Values) != 2 {
+		t.Fatalf("Expected 2 exported headers, got %d", len(list.Values))
+	}
+}
+
+func TestParseSharedLibs(t *testing.T) {
+	input := `cc_binary {
+    name: "hello",
+    srcs: ["main.c"],
+    deps: [":libstatic"],
+    shared_libs: [":libshared"],
+}`
+
+	p := NewParser(strings.NewReader(input), "test.bp")
+	file, errs := p.Parse()
+
+	if len(errs) > 0 {
+		t.Fatalf("Parse errors: %v", errs)
+	}
+
+	mod := file.Defs[0].(*Module)
+	depsProp := findProperty(mod.Map, "shared_libs")
+	if depsProp == nil {
+		t.Fatal("Missing 'shared_libs' property")
+	}
+	list, ok := depsProp.Value.(*List)
+	if !ok {
+		t.Fatalf("Expected *List, got %T", depsProp.Value)
+	}
+	if len(list.Values) != 1 {
+		t.Fatalf("Expected 1 shared_lib, got %d", len(list.Values))
+	}
+}

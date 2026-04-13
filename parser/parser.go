@@ -113,7 +113,7 @@ func (p *Parser) parseModule(typeName string, typePos scanner.Position) (*Module
 		return nil, err
 	}
 
-	return &Module{
+	mod := &Module{
 		Type:    typeName,
 		TypePos: typePos,
 		Map: &Map{
@@ -121,7 +121,30 @@ func (p *Parser) parseModule(typeName string, typePos scanner.Position) (*Module
 			LBracePos:  lbracePos,
 			RBracePos:  rbracePos,
 		},
-	}, nil
+	}
+
+	// Extract arch overrides from properties
+	archProps := make(map[string]*Map)
+	var filteredProps []*Property
+	for _, prop := range propertyList {
+		if prop.Name == "arch" {
+			if archMap, ok := prop.Value.(*Map); ok {
+				for _, ap := range archMap.Properties {
+					if archInner, ok := ap.Value.(*Map); ok {
+						archProps[ap.Name] = archInner
+					}
+				}
+			}
+		} else {
+			filteredProps = append(filteredProps, prop)
+		}
+	}
+	if len(archProps) > 0 {
+		mod.Arch = archProps
+		mod.Map.Properties = filteredProps
+	}
+
+	return mod, nil
 }
 
 // parsePropertyList parses a list of properties: { property [,] }

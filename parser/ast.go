@@ -17,6 +17,7 @@ type Module struct {
 	Type    string
 	TypePos scanner.Position
 	Map     *Map
+	Arch    map[string]*Map // arch-specific overrides: arch name -> properties
 }
 
 func (m *Module) Pos() scanner.Position { return m.TypePos }

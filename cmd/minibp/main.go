@@ -94,13 +94,17 @@ func (g *Graph) TopoSort() ([][]string, error) {
 
 func main() {
 	var (
-		outFile = flag.String("o", "build.ninja", "output ninja file")
-		all     = flag.Bool("a", false, "parse all .bp files in directory")
+		outFile  = flag.String("o", "build.ninja", "output ninja file")
+		all      = flag.Bool("a", false, "parse all .bp files in directory")
+		ccFlag   = flag.String("cc", "", "C compiler (default: gcc)")
+		cxxFlag  = flag.String("cxx", "", "C++ compiler (default: g++)")
+		arFlag   = flag.String("ar", "", "archiver (default: ar)")
+		archFlag = flag.String("arch", "", "target architecture (arm, arm64, x86, x86_64)")
 	)
 	flag.Parse()
 
 	if len(flag.Args()) < 1 && !*all {
-		fmt.Fprintln(os.Stderr, "Usage: minibp [-o output] [-a] <file.bp | directory>")
+		fmt.Fprintln(os.Stderr, "Usage: minibp [-o output] [-a] [-cc CC] [-cxx CXX] [-ar AR] [-arch ARCH] <file.bp | directory>")
 		os.Exit(1)
 	}
 
@@ -148,6 +152,10 @@ func main() {
 				if name != "" {
 					// Expand globs in srcs before storing module
 					expandGlobsInModule(mod, srcDir)
+					// Merge arch-specific overrides if target arch is set
+					if *archFlag != "" && mod.Arch != nil {
+						mergeArchProps(mod, *archFlag)
+					}
 					modules[name] = mod
 				}
 			}
@@ -164,6 +172,11 @@ func main() {
 	for name, mod := range modules {
 		deps := getListProp(mod, "deps")
 		for _, dep := range deps {
+			depName := strings.TrimPrefix(dep, ":")
+			graph.AddEdge(name, depName)
+		}
+		sharedLibs := getListProp(mod, "shared_libs")
+		for _, dep := range sharedLibs {
 			depName := strings.TrimPrefix(dep, ":")
 			graph.AddEdge(name, depName)
 		}
@@ -212,6 +225,19 @@ func main() {
 	gen.SetRegen(regenCmd, files, *outFile)
 	gen.SetWorkDir(srcDir)
 
+	tc := ninja.DefaultToolchain()
+	if *ccFlag != "" {
+		tc.CC = *ccFlag
+	}
+	if *cxxFlag != "" {
+		tc.CXX = *cxxFlag
+	}
+	if *arFlag != "" {
+		tc.AR = *arFlag
+	}
+	gen.SetToolchain(tc)
+	gen.SetArch(*archFlag)
+
 	if err := gen.Generate(out); err != nil {
 		fmt.Fprintf(os.Stderr, "Error generating ninja: %v\n", err)
 		os.Exit(1)
@@ -252,6 +278,50 @@ func getListProp(m *parser.Module, name string) []string {
 		}
 	}
 	return nil
+}
+
+// mergeArchProps merges arch-specific properties into the module's main Map.
+// For list properties (srcs, cflags, etc.), arch values are appended.
+// For scalar properties (strings), arch values override base values.
+func mergeArchProps(m *parser.Module, arch string) {
+	archMap, ok := m.Arch[arch]
+	if !ok || archMap == nil {
+		return
+	}
+	for _, prop := range archMap.Properties {
+		switch prop.Value.(type) {
+		case *parser.List:
+			// Append to existing list
+			merged := false
+			for _, baseProp := range m.Map.Properties {
+				if baseProp.Name == prop.Name {
+					if baseList, ok := baseProp.Value.(*parser.List); ok {
+						if archList, ok := prop.Value.(*parser.List); ok {
+							baseList.Values = append(baseList.Values, archList.Values...)
+						}
+					}
+					merged = true
+					break
+				}
+			}
+			if !merged {
+				m.Map.Properties = append(m.Map.Properties, prop)
+			}
+		default:
+			// Override scalar value
+			found := false
+			for i, baseProp := range m.Map.Properties {
+				if baseProp.Name == prop.Name {
+					m.Map.Properties[i] = prop
+					found = true
+					break
+				}
+			}
+			if !found {
+				m.Map.Properties = append(m.Map.Properties, prop)
+			}
+		}
+	}
 }
 
 // expandGlobsInModule expands glob patterns in module srcs

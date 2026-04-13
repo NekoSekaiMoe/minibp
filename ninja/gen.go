@@ -28,6 +28,17 @@ type Generator struct {
 	inputFiles []string
 	outputFile string
 	workDir    string
+	toolchain  Toolchain
+	arch       string
+}
+
+// Toolchain holds compiler/tool configuration for cross-compilation
+type Toolchain struct {
+	CC      string   // C compiler (default: gcc)
+	CXX     string   // C++ compiler (default: g++)
+	AR      string   // archiver (default: ar)
+	CFlags  []string // extra global cflags
+	LdFlags []string // extra global ldflags
 }
 
 // NewGenerator creates a new Generator with the given graph and rules
@@ -65,6 +76,22 @@ func (g *Generator) SetRegen(cmd string, files []string, output string) {
 
 func (g *Generator) SetWorkDir(dir string) {
 	g.workDir = dir
+}
+
+func (g *Generator) SetToolchain(t Toolchain) {
+	g.toolchain = t
+}
+
+func (g *Generator) SetArch(arch string) {
+	g.arch = arch
+}
+
+func DefaultToolchain() Toolchain {
+	return Toolchain{
+		CC:  "gcc",
+		CXX: "g++",
+		AR:  "ar",
+	}
 }
 
 // getRelativePath returns the path from outputDir to a file in sourceDir
@@ -118,6 +145,16 @@ func (g *Generator) collectIncludePaths(moduleName string, visited map[string]bo
 		}
 	}
 
+	// Collect directories from exported_headers (individual .h files)
+	exportedHeaders := getExportedHeaders(m)
+	for _, h := range exportedHeaders {
+		dir := filepath.Dir(h)
+		if dir != "" && dir != "." && !seen[dir] {
+			includes = append(includes, dir)
+			seen[dir] = true
+		}
+	}
+
 	// Collect from header_libs (cc_library_headers dependencies)
 	headerLibs := getListProp(m, "header_libs")
 	for _, dep := range headerLibs {
@@ -163,6 +200,27 @@ func (g *Generator) Generate(w io.Writer) error {
 		nw.Variable("builddir", ".")
 		nw.Comment("")
 	}
+
+	// Set toolchain env vars before generating rules (rules read them via getCC/getCXX/getAR)
+	tc := g.toolchain
+	if tc.CC == "" {
+		tc.CC = "gcc"
+	}
+	if tc.CXX == "" {
+		tc.CXX = "g++"
+	}
+	if tc.AR == "" {
+		tc.AR = "ar"
+	}
+	os.Setenv("MINIBP_CC", tc.CC)
+	os.Setenv("MINIBP_CXX", tc.CXX)
+	os.Setenv("MINIBP_AR", tc.AR)
+	archSuffix := ""
+	if g.arch != "" {
+		os.Setenv("MINIBP_ARCH", g.arch)
+		archSuffix = "_" + g.arch
+	}
+	os.Setenv("MINIBP_ARCH_SUFFIX", archSuffix)
 
 	usedModuleTypes := g.collectUsedModuleTypes()
 
