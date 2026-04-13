@@ -45,7 +45,7 @@ cpp_binary {
 // Go library (archive)
 go_library {
     name: "libapi",
-    srcs: ["api.go", "types.go"],
+    srcs: ["src/api.go", "src/types.go"],
 }
 
 // Go binary executable

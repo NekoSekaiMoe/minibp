@@ -3,6 +3,8 @@ package api
 
 import "fmt"
 
+const Version = "1.0.0"
+
 type Service struct {
 	Name string
 }

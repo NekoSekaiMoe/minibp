@@ -291,9 +291,17 @@ func (r *ccBinary) Outputs(m *parser.Module) []string {
 	}
 	return []string{name}
 }
+func getLibOutputName(name string) string {
+	if strings.HasPrefix(name, "lib") {
+		return "lib" + name + ".a"
+	}
+	return "lib" + name + ".a"
+}
+
 func (r *ccBinary) NinjaEdge(m *parser.Module) string {
 	name := getName(m)
 	srcs := getSrcs(m)
+	deps := getListProp(m, "deps")
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
@@ -306,6 +314,11 @@ func (r *ccBinary) NinjaEdge(m *parser.Module) string {
 		}
 		allFlags += ldflags
 	}
+	var libFiles []string
+	for _, dep := range deps {
+		depName := strings.TrimPrefix(dep, ":")
+		libFiles = append(libFiles, getLibOutputName(depName))
+	}
 	var edges strings.Builder
 	var objFiles []string
 	for _, src := range srcs {
@@ -315,7 +328,8 @@ func (r *ccBinary) NinjaEdge(m *parser.Module) string {
 		edges.WriteString(fmt.Sprintf("build %s: cc_compile %s\n flags = %s\n", obj, src, cflags))
 	}
 	out := r.Outputs(m)[0]
-	edges.WriteString(fmt.Sprintf("build %s: cc_link %s\n flags = %s\n", out, strings.Join(objFiles, " "), allFlags))
+	allInputs := append(objFiles, libFiles...)
+	edges.WriteString(fmt.Sprintf("build %s: cc_link %s\n flags = %s\n", out, strings.Join(allInputs, " "), allFlags))
 	return edges.String()
 }
 func (r *ccBinary) Desc(m *parser.Module, srcFile string) string {
@@ -418,6 +432,7 @@ func (r *cppBinary) Outputs(m *parser.Module) []string {
 func (r *cppBinary) NinjaEdge(m *parser.Module) string {
 	name := getName(m)
 	srcs := getSrcs(m)
+	deps := getListProp(m, "deps")
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
@@ -431,6 +446,11 @@ func (r *cppBinary) NinjaEdge(m *parser.Module) string {
 		}
 		allFlags += cppflags
 	}
+	var libFiles []string
+	for _, dep := range deps {
+		depName := strings.TrimPrefix(dep, ":")
+		libFiles = append(libFiles, getLibOutputName(depName))
+	}
 	var edges strings.Builder
 	var objFiles []string
 	for _, src := range srcs {
@@ -443,9 +463,11 @@ func (r *cppBinary) NinjaEdge(m *parser.Module) string {
 		edges.WriteString(fmt.Sprintf("build %s: cpp_compile %s\n flags = %s\n", obj, src, allFlags))
 	}
 	out := r.Outputs(m)[0]
-	edges.WriteString(fmt.Sprintf("build %s: cpp_link %s\n flags = %s\n", out, strings.Join(objFiles, " "), ldflags))
+	allInputs := append(objFiles, libFiles...)
+	edges.WriteString(fmt.Sprintf("build %s: cpp_link %s\n flags = %s\n", out, strings.Join(allInputs, " "), ldflags))
 	return edges.String()
 }
+
 func (r *cppBinary) Desc(m *parser.Module, srcFile string) string {
 	if srcFile == "" {
 		return "cpp_link"
@@ -521,9 +543,10 @@ type goTest struct{}
 func (r *goTest) Name() string { return "go_test" }
 func (r *goTest) NinjaRule() string {
 	return `rule go_test
- command = go test -c -o $out $in
+ command = go test -c -o $out $pkg
 `
 }
+
 func (r *goTest) Outputs(m *parser.Module) []string {
 	name := getName(m)
 	if name == "" {
@@ -539,7 +562,13 @@ func (r *goTest) NinjaEdge(m *parser.Module) string {
 	}
 	goflags := getGoflags(m)
 	out := r.Outputs(m)[0]
-	return fmt.Sprintf("build %s: go_test %s\n flags = %s\n", out, strings.Join(srcs, " "), goflags)
+	// Extract package path from first source file
+	// Convert "dag/graph_test.go" to "./dag"
+	pkgPath := "./" + filepath.Dir(srcs[0])
+
+	// Build the test binary
+	// Use go test -c which requires a package path
+	return fmt.Sprintf("build %s: go_test\n pkg = %s\n flags = %s\n", out, pkgPath, goflags)
 }
 func (r *goTest) Desc(m *parser.Module, srcFile string) string { return "go test" }
 
@@ -853,10 +882,32 @@ func (r *customRule) NinjaEdge(m *parser.Module) string {
 	}
 	outStr := strings.Join(outs, " ")
 	srcStr := strings.Join(srcs, " ")
-	if srcStr == "" {
-		return fmt.Sprintf("build %s: custom_command\n cmd = %s\n", outStr, cmd)
+
+	// Expand $in and $out directly in the command
+	actualCmd := cmd
+	actualCmd = strings.ReplaceAll(actualCmd, "$in", srcStr)
+	actualCmd = strings.ReplaceAll(actualCmd, "$out", outStr)
+
+	// Generate a unique rule for this specific command
+	// Use hash of command to create unique rule name
+	hash := 0
+	for _, c := range actualCmd {
+		hash = hash*31 + int(c)
 	}
-	return fmt.Sprintf("build %s: custom_command %s\n cmd = %s\n", outStr, srcStr, cmd)
+	if hash < 0 {
+		hash = -hash
+	}
+	ruleName := fmt.Sprintf("custom_cmd_%d", hash%10000)
+
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("rule %s\n command = %s\n\n", ruleName, actualCmd))
+	if srcStr == "" {
+		result.WriteString(fmt.Sprintf("build %s: %s\n", outStr, ruleName))
+	} else {
+		result.WriteString(fmt.Sprintf("build %s: %s %s\n", outStr, ruleName, srcStr))
+	}
+
+	return result.String()
 }
 func (r *customRule) Desc(m *parser.Module, srcFile string) string { return "custom" }
 
