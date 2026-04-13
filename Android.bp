@@ -121,6 +121,7 @@ custom {
     srcs: [
         "**/*.go",
     ],
+    exclude_dirs: ["examples"],
     outs: ["test_result.txt"],
 }
 

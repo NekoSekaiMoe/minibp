@@ -877,19 +877,23 @@ func (r *customRule) NinjaEdge(m *parser.Module) string {
 	srcs := getListProp(m, "srcs")
 	outs := getListProp(m, "outs")
 	cmd := getStringProp(m, "cmd")
+	excludeDirs := getListProp(m, "exclude_dirs")
 	if len(outs) == 0 || cmd == "" {
 		return ""
 	}
 	outStr := strings.Join(outs, " ")
 	srcStr := strings.Join(srcs, " ")
 
-	// Expand $in and $out directly in the command
 	actualCmd := cmd
 	actualCmd = strings.ReplaceAll(actualCmd, "$in", srcStr)
 	actualCmd = strings.ReplaceAll(actualCmd, "$out", outStr)
 
-	// Generate a unique rule for this specific command
-	// Use hash of command to create unique rule name
+	if len(excludeDirs) > 0 {
+		for _, dir := range excludeDirs {
+			actualCmd = strings.ReplaceAll(actualCmd, "./...", "$(shell go list ./... | grep -v /"+dir+")")
+		}
+	}
+
 	hash := 0
 	for _, c := range actualCmd {
 		hash = hash*31 + int(c)
