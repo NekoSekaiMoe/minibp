@@ -1,4 +1,6 @@
 // ninja/gen.go - Ninja file generator
+// This file generates Ninja build files from the module dependency graph.
+// It translates minibp module definitions into Ninja syntax for building.
 package ninja
 
 import (
@@ -12,37 +14,45 @@ import (
 	"minibp/parser"
 )
 
-// Graph is the interface needed for ninja generation
+// Graph is the interface needed for ninja generation.
+// It provides the topological sort of module dependencies.
 type Graph interface {
+	// TopoSort returns modules organized by build level.
+	// Each level can be built in parallel, but levels must be built in order.
 	TopoSort() ([][]string, error)
 }
 
-// Generator creates ninja build files from module dependency graphs
+// Generator creates ninja build files from module dependency graphs.
+// It orchestrates the translation from high-level module definitions
+// to low-level Ninja build rules and edges.
 type Generator struct {
-	graph      Graph
-	rules      map[string]BuildRule
-	modules    map[string]*parser.Module
-	sourceDir  string
-	outputDir  string
-	pathPrefix string
-	regenCmd   string
-	inputFiles []string
-	outputFile string
-	workDir    string
-	toolchain  Toolchain
-	arch       string
+	graph      Graph                     // Dependency graph for topological sorting
+	rules      map[string]BuildRule      // Map of rule name to rule implementation
+	modules    map[string]*parser.Module // All modules in the build
+	sourceDir  string                    // Source directory where .bp files are located
+	outputDir  string                    // Output directory where ninja runs
+	pathPrefix string                    // Prefix to prepend to source file paths
+	regenCmd   string                    // Command to regenerate build.ninja
+	inputFiles []string                  // Files that trigger regeneration
+	outputFile string                    // Output file for regeneration rule
+	workDir    string                    // Working directory for custom rules
+	toolchain  Toolchain                 // Compiler toolchain configuration
+	arch       string                    // Target architecture
 }
 
-// Toolchain holds compiler/tool configuration for cross-compilation
+// Toolchain holds compiler/tool configuration for cross-compilation.
+// This allows targeting different architectures and using different compilers.
 type Toolchain struct {
-	CC      string   // C compiler (default: gcc)
-	CXX     string   // C++ compiler (default: g++)
-	AR      string   // archiver (default: ar)
-	CFlags  []string // extra global cflags
-	LdFlags []string // extra global ldflags
+	CC      string   // C compiler command (e.g., gcc, clang)
+	CXX     string   // C++ compiler command (e.g., g++, clang++)
+	AR      string   // Static library archiver (e.g., ar, llvm-ar)
+	CFlags  []string // Extra global C/C++ compiler flags
+	LdFlags []string // Extra global linker flags
 }
 
-// NewGenerator creates a new Generator with the given graph and rules
+// NewGenerator creates a new Generator with the given graph and rules.
+// The graph provides dependency ordering, rules map module types to implementations,
+// and modules contains all the module definitions.
 func NewGenerator(g Graph, rules map[string]BuildRule, modules map[string]*parser.Module) *Generator {
 	return &Generator{
 		graph:     g,
@@ -53,40 +63,52 @@ func NewGenerator(g Graph, rules map[string]BuildRule, modules map[string]*parse
 	}
 }
 
-// SetSourceDir sets the source directory (where .bp files are)
+// SetSourceDir sets the source directory where .bp (Blueprint) files are located.
+// This is used for computing relative paths to source files.
 func (g *Generator) SetSourceDir(dir string) {
 	g.sourceDir = dir
 }
 
-// SetOutputDir sets the output directory (where ninja will run)
+// SetOutputDir sets the output directory where ninja will run.
+// This is used for computing relative paths from the build directory.
 func (g *Generator) SetOutputDir(dir string) {
 	g.outputDir = dir
 }
 
-// SetPathPrefix sets the prefix to prepend to source file paths
+// SetPathPrefix sets the prefix to prepend to source file paths.
+// This is useful when the build directory is different from the source directory.
 func (g *Generator) SetPathPrefix(prefix string) {
 	g.pathPrefix = prefix
 }
 
-// SetRegen sets the command and files for auto-regeneration of build.ninja
+// SetRegen sets the command and files for auto-regeneration of build.ninja.
+// When any input file changes, ninja will re-run minibp to regenerate the build file.
 func (g *Generator) SetRegen(cmd string, files []string, output string) {
 	g.regenCmd = cmd
 	g.inputFiles = files
 	g.outputFile = output
 }
 
+// SetWorkDir sets the working directory for custom rules.
+// This is used by custom rules that need to glob files in the source tree.
 func (g *Generator) SetWorkDir(dir string) {
 	g.workDir = dir
 }
 
+// SetToolchain sets the compiler toolchain configuration.
+// This overrides the default GNU toolchain with custom compilers.
 func (g *Generator) SetToolchain(t Toolchain) {
 	g.toolchain = t
 }
 
+// SetArch sets the target architecture for cross-compilation.
+// This appends an architecture suffix to output binaries.
 func (g *Generator) SetArch(arch string) {
 	g.arch = arch
 }
 
+// DefaultToolchain returns a Toolchain with common GNU development tools.
+// This is used when no custom toolchain is specified.
 func DefaultToolchain() Toolchain {
 	return Toolchain{
 		CC:  "gcc",
@@ -95,7 +117,8 @@ func DefaultToolchain() Toolchain {
 	}
 }
 
-// getRelativePath returns the path from outputDir to a file in sourceDir
+// getRelativePath returns the relative path from the output directory to a file in the source directory.
+// This is used when the build directory differs from the source directory.
 func (g *Generator) getRelativePath(file string) string {
 	if g.sourceDir == g.outputDir {
 		return file
@@ -111,7 +134,9 @@ func (g *Generator) getRelativePath(file string) string {
 	return file
 }
 
-// collectIncludePaths recursively collects export_include_dirs from dependencies
+// collectIncludePaths recursively collects export_include_dirs from a module and its dependencies.
+// These directories are added to the compiler's include path (-I flags).
+// It traverses cc_library_headers, header_libs, shared_libs, and deps to find all exported headers.
 func (g *Generator) collectIncludePaths(moduleName string, visited map[string]bool) []string {
 	if visited[moduleName] {
 		return nil

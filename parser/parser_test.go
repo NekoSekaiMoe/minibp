@@ -5,7 +5,9 @@ import (
 	"testing"
 )
 
-// TestParseSimpleModule tests parsing a simple cc_binary module
+// TestParseSimpleModule tests parsing a simple cc_binary module.
+// This test verifies that the parser correctly handles a basic module
+// with name and srcs properties.
 func TestParseSimpleModule(t *testing.T) {
 	input := `cc_binary {
     name: "hello",
@@ -72,7 +74,9 @@ func TestParseSimpleModule(t *testing.T) {
 	}
 }
 
-// TestParseWithDeps tests parsing a module with dependencies
+// TestParseWithDeps tests parsing a module with dependencies.
+// This test verifies that the parser correctly handles the deps property
+// which is a list of module references.
 func TestParseWithDeps(t *testing.T) {
 	input := `cc_binary {
     name: "hello",
@@ -113,7 +117,9 @@ func TestParseWithDeps(t *testing.T) {
 	}
 }
 
-// TestParseAssignment tests parsing a variable assignment
+// TestParseAssignment tests parsing a variable assignment.
+// This test verifies that the parser correctly handles simple variable
+// assignments like foo = "bar".
 func TestParseAssignment(t *testing.T) {
 	input := `foo = "bar"`
 
@@ -150,7 +156,9 @@ func TestParseAssignment(t *testing.T) {
 	}
 }
 
-// TestParseList tests parsing a list expression
+// TestParseList tests parsing a list expression.
+// This test verifies that the parser correctly handles list literals
+// like ["a", "b", "c"].
 func TestParseList(t *testing.T) {
 	input := `my_list = ["a", "b", "c"]`
 
@@ -187,7 +195,9 @@ func TestParseList(t *testing.T) {
 	}
 }
 
-// TestParseMultipleModules tests parsing multiple modules
+// TestParseMultipleModules tests parsing multiple modules in sequence.
+// This verifies that the parser can handle multiple top-level definitions
+// in a single file.
 func TestParseMultipleModules(t *testing.T) {
 	input := `cc_library {
     name: "libfoo",
@@ -230,7 +240,9 @@ cc_binary {
 	}
 }
 
-// TestParseComments tests that comments are skipped
+// TestParseComments tests that comments are skipped during parsing.
+// Blueprint supports both line comments (//) and inline comments.
+// This test verifies comments are properly ignored and not treated as syntax.
 func TestParseComments(t *testing.T) {
 	input := `// This is a comment
 cc_binary {
@@ -250,7 +262,9 @@ cc_binary {
 	}
 }
 
-// TestParseInteger tests parsing integer values
+// TestParseInteger tests parsing integer values.
+// This verifies that integer literals in properties are correctly
+// parsed as Int64 nodes.
 func TestParseInteger(t *testing.T) {
 	input := `cc_binary {
     name: "test",
@@ -279,7 +293,8 @@ func TestParseInteger(t *testing.T) {
 	}
 }
 
-// TestParseBoolean tests parsing boolean values
+// TestParseBoolean tests parsing boolean values.
+// This verifies that boolean literals (true/false) are correctly parsed.
 func TestParseBoolean(t *testing.T) {
 	input := `cc_binary {
     name: "test",
@@ -308,7 +323,9 @@ func TestParseBoolean(t *testing.T) {
 	}
 }
 
-// TestParseNestedMap tests parsing nested maps
+// TestParseNestedMap tests parsing nested maps.
+// This verifies that the parser correctly handles maps within properties,
+// such as config: { debug: true }.
 func TestParseNestedMap(t *testing.T) {
 	input := `cc_binary {
     name: "test",
@@ -340,7 +357,8 @@ func TestParseNestedMap(t *testing.T) {
 	}
 }
 
-// TestParseEmptyModule tests parsing an empty module
+// TestParseEmptyModule tests parsing an empty module with no properties.
+// This verifies the parser handles empty brace blocks correctly.
 func TestParseEmptyModule(t *testing.T) {
 	input := `cc_binary {}`
 
@@ -361,7 +379,8 @@ func TestParseEmptyModule(t *testing.T) {
 	}
 }
 
-// TestParseEmptyList tests parsing an empty list
+// TestParseEmptyList tests parsing an empty list.
+// This verifies that empty brackets [] are correctly parsed as empty lists.
 func TestParseEmptyList(t *testing.T) {
 	input := `cc_binary {
     name: "test",
@@ -391,7 +410,9 @@ func TestParseEmptyList(t *testing.T) {
 	}
 }
 
-// TestParseError tests error handling for invalid input
+// TestParseError tests error handling for invalid input.
+// This verifies that the parser correctly reports errors when the input
+// is malformed, such as an incomplete module definition.
 func TestParseError(t *testing.T) {
 	input := `cc_binary`
 
@@ -403,7 +424,9 @@ func TestParseError(t *testing.T) {
 	}
 }
 
-// TestParseStringEscapes tests parsing strings with escape sequences
+// TestParseStringEscapes tests parsing strings with escape sequences.
+// This verifies that escape sequences like \t (tab) are correctly processed
+// in string literals.
 func TestParseStringEscapes(t *testing.T) {
 	input := `cc_binary {
     name: "hello\tworld",
@@ -425,6 +448,9 @@ func TestParseStringEscapes(t *testing.T) {
 	}
 }
 
+// TestParseRawString tests parsing raw string literals.
+// Raw strings use backticks (`) and don't process escape sequences.
+// This verifies raw strings are preserved as-is without escape processing.
 func TestParseRawString(t *testing.T) {
 	input := "cc_binary {\n    name: `hello\\nworld`,\n    srcs: [\"main.c\"],\n}"
 
@@ -443,6 +469,8 @@ func TestParseRawString(t *testing.T) {
 	}
 }
 
+// TestParseListTrailingComma tests that trailing commas in lists are allowed.
+// Blueprint allows a comma after the last element in lists and property maps.
 func TestParseListTrailingComma(t *testing.T) {
 	input := `my_list = ["a", "b",]`
 
@@ -468,6 +496,8 @@ func TestParseListTrailingComma(t *testing.T) {
 	}
 }
 
+// TestParseListMissingComma tests that missing commas between list elements
+// are correctly reported as errors.
 func TestParseListMissingComma(t *testing.T) {
 	input := `my_list = ["a" "b"]`
 
@@ -479,6 +509,8 @@ func TestParseListMissingComma(t *testing.T) {
 	}
 }
 
+// TestParseModulePropertiesMissingComma tests that missing commas between
+// module properties are correctly reported as errors.
 func TestParseModulePropertiesMissingComma(t *testing.T) {
 	input := `cc_binary {
     name: "hello"
@@ -493,6 +525,8 @@ func TestParseModulePropertiesMissingComma(t *testing.T) {
 	}
 }
 
+// TestParseNestedMapPropertiesMissingComma tests that missing commas in
+// nested map properties are correctly reported as errors.
 func TestParseNestedMapPropertiesMissingComma(t *testing.T) {
 	input := `cc_binary {
     name: "hello",
@@ -510,7 +544,14 @@ func TestParseNestedMapPropertiesMissingComma(t *testing.T) {
 	}
 }
 
-// Helper function to find a property by name
+// findProperty is a helper function that searches a map for a property by name.
+// It returns nil if the property is not found.
+// Parameters:
+//   - m: The Map to search
+//   - name: The property name to find
+//
+// Returns:
+//   - *Property: The matching property, or nil if not found
 func findProperty(m *Map, name string) *Property {
 	for _, prop := range m.Properties {
 		if prop.Name == name {
@@ -520,7 +561,9 @@ func findProperty(m *Map, name string) *Property {
 	return nil
 }
 
-// TestParseAssignmentWithPlusEqual tests += assignment
+// TestParseAssignmentWithPlusEqual tests parsing the += assignment operator.
+// This verifies that += is correctly recognized as a concatenative assignment
+// that appends to an existing variable.
 func TestParseAssignmentWithPlusEqual(t *testing.T) {
 	input := `foo += "bar"`
 
@@ -541,6 +584,9 @@ func TestParseAssignmentWithPlusEqual(t *testing.T) {
 	}
 }
 
+// TestParseArchBlock tests parsing the arch: {} block for architecture-specific
+// property overrides. The parser should extract arch properties from the main
+// module properties and store them in the Module.Arch map.
 func TestParseArchBlock(t *testing.T) {
 	input := `cc_library {
     name: "libfoo",
@@ -592,6 +638,8 @@ func TestParseArchBlock(t *testing.T) {
 	}
 }
 
+// TestParseInvalidArchOverrideValue tests that the parser reports an error when
+// the arch property is not a map (e.g., arch: true).
 func TestParseInvalidArchOverrideValue(t *testing.T) {
 	input := `cc_library {
     name: "libfoo",
@@ -606,6 +654,8 @@ func TestParseInvalidArchOverrideValue(t *testing.T) {
 	}
 }
 
+// TestParseInvalidArchNestedOverrideValue tests that the parser reports an error
+// when a nested arch value is not a map (e.g., arch: { arm: true }).
 func TestParseInvalidArchNestedOverrideValue(t *testing.T) {
 	input := `cc_library {
     name: "libfoo",
@@ -622,6 +672,8 @@ func TestParseInvalidArchNestedOverrideValue(t *testing.T) {
 	}
 }
 
+// TestParseInvalidHostOverrideValue tests that the parser reports an error when
+// the host property is not a map (e.g., host: false).
 func TestParseInvalidHostOverrideValue(t *testing.T) {
 	input := `cc_library {
     name: "libfoo",
@@ -636,6 +688,8 @@ func TestParseInvalidHostOverrideValue(t *testing.T) {
 	}
 }
 
+// TestParseInvalidTargetOverrideValue tests that the parser reports an error when
+// the target property is not a map (e.g., target: "device").
 func TestParseInvalidTargetOverrideValue(t *testing.T) {
 	input := `cc_library {
     name: "libfoo",
@@ -650,6 +704,8 @@ func TestParseInvalidTargetOverrideValue(t *testing.T) {
 	}
 }
 
+// TestParseInvalidStringLiteral tests that the parser reports an error for
+// unterminated string literals.
 func TestParseInvalidStringLiteral(t *testing.T) {
 	input := "cc_binary {\n    name: \"unterminated\n}"
 
@@ -664,6 +720,8 @@ func TestParseInvalidStringLiteral(t *testing.T) {
 	}
 }
 
+// TestParseMalformedSyntaxReportsError tests that various malformed syntax
+// patterns are correctly detected and reported as errors.
 func TestParseMalformedSyntaxReportsError(t *testing.T) {
 	inputs := []string{
 		`cc_binary { name: "hello", srcs: ["main.c"]`,
@@ -679,6 +737,8 @@ func TestParseMalformedSyntaxReportsError(t *testing.T) {
 	}
 }
 
+// TestParseErrorIncludesFilenameAndPosition tests that parse errors include
+// both the filename and the position in the error message for debugging.
 func TestParseErrorIncludesFilenameAndPosition(t *testing.T) {
 	input := `cc_binary {
     name "hello",
@@ -698,6 +758,8 @@ func TestParseErrorIncludesFilenameAndPosition(t *testing.T) {
 	}
 }
 
+// TestParseExportedHeaders tests parsing the exported_headers property.
+// This verifies that modules can have exported headers specified as a list.
 func TestParseExportedHeaders(t *testing.T) {
 	input := `cc_library {
     name: "libfoo",
@@ -726,6 +788,8 @@ func TestParseExportedHeaders(t *testing.T) {
 	}
 }
 
+// TestParseSharedLibs tests parsing the shared_libs property.
+// This verifies that modules can specify shared library dependencies.
 func TestParseSharedLibs(t *testing.T) {
 	input := `cc_binary {
     name: "hello",
@@ -755,6 +819,9 @@ func TestParseSharedLibs(t *testing.T) {
 	}
 }
 
+// TestParseSelectMultiPatternCase tests parsing a select() expression with
+// multiple patterns in a single case (e.g., "linux", "android": ["unix.c"]).
+// This verifies that comma-separated patterns are correctly grouped.
 func TestParseSelectMultiPatternCase(t *testing.T) {
 	input := `cc_binary {
     name: "test",

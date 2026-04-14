@@ -1,3 +1,7 @@
+// Package module provides tests for the module type system.
+// Tests cover module creation, registry operations, and property handling.
+// The test suite verifies both the Module interface implementation and
+// the factory-based module instantiation from AST nodes.
 package module
 
 import (
@@ -9,9 +13,18 @@ import (
 	"minibp/parser"
 )
 
-// MockFactory implements Factory interface for testing
+// MockFactory is a test implementation of the Factory interface.
+// It creates simple BaseModule instances for testing registry operations.
 type MockFactory struct{}
 
+// Create instantiates a BaseModule with just name and type from the AST.
+// Parameters:
+//   - ast: The parser.Module AST node
+//   - eval: Optional evaluator (not used in mock)
+//
+// Returns:
+//
+//	A BaseModule with name from AST "name" property and type from ast.Type
 func (m *MockFactory) Create(ast *parser.Module, eval *parser.Evaluator) (Module, error) {
 	return &BaseModule{
 		Name_: getStringFromAST(ast, "name"),
@@ -19,6 +32,14 @@ func (m *MockFactory) Create(ast *parser.Module, eval *parser.Evaluator) (Module
 	}, nil
 }
 
+// getStringFromAST is a test helper that extracts a string property from AST.
+// Parameters:
+//   - ast: The parser.Module to extract from
+//   - name: The property name to find
+//
+// Returns:
+//
+//	The string value, or empty string if not found
 func getStringFromAST(ast *parser.Module, name string) string {
 	if ast.Map == nil {
 		return ""
@@ -33,7 +54,8 @@ func getStringFromAST(ast *parser.Module, name string) string {
 	return ""
 }
 
-// TestBaseModuleCreation tests creating a BaseModule
+// TestBaseModuleCreation verifies that BaseModule correctly implements
+// the Module interface and returns expected values for all methods.
 func TestBaseModuleCreation(t *testing.T) {
 	m := &BaseModule{
 		Name_:  "test",
@@ -60,7 +82,8 @@ func TestBaseModuleCreation(t *testing.T) {
 	}
 }
 
-// TestRegistryRegister tests registering factories
+// TestRegistryRegister verifies that Register correctly adds a factory
+// to the registry and that Lookup can retrieve it.
 func TestRegistryRegister(t *testing.T) {
 	resetRegistry()
 
@@ -78,7 +101,8 @@ func TestRegistryRegister(t *testing.T) {
 	}
 }
 
-// TestRegistryLookupUnknown tests looking up unregistered types
+// TestRegistryLookupUnknown verifies that Lookup returns nil for
+// module types that haven't been registered.
 func TestRegistryLookupUnknown(t *testing.T) {
 	resetRegistry()
 
@@ -88,19 +112,24 @@ func TestRegistryLookupUnknown(t *testing.T) {
 	}
 }
 
-// FactoryA and FactoryB implement Factory for testing
+// TestFactoryA and TestFactoryB are test implementations of the Factory
+// interface that create modules with different names for testing multiple
+// registrations.
 type TestFactoryA struct{}
 type TestFactoryB struct{}
 
+// Create returns a module with name "A" and type "type_a"
 func (f *TestFactoryA) Create(ast *parser.Module, eval *parser.Evaluator) (Module, error) {
 	return &BaseModule{Name_: "A", Type_: "type_a"}, nil
 }
 
+// Create returns a module with name "B" and type "type_b"
 func (f *TestFactoryB) Create(ast *parser.Module, eval *parser.Evaluator) (Module, error) {
 	return &BaseModule{Name_: "B", Type_: "type_b"}, nil
 }
 
-// TestRegistryMultipleTypes tests registering multiple factories
+// TestRegistryMultipleTypes verifies that multiple module types can be
+// registered and retrieved independently from the registry.
 func TestRegistryMultipleTypes(t *testing.T) {
 	resetRegistry()
 
@@ -119,6 +148,14 @@ func TestRegistryMultipleTypes(t *testing.T) {
 	}
 }
 
+// getListFromAST is a test helper that extracts a list of strings from AST.
+// Parameters:
+//   - ast: The parser.Module to extract from
+//   - name: The property name containing the list
+//
+// Returns:
+//
+//	A slice of strings, or nil if not found
 func getListFromAST(ast *parser.Module, name string) []string {
 	if ast.Map == nil {
 		return nil
@@ -139,7 +176,8 @@ func getListFromAST(ast *parser.Module, name string) []string {
 	return nil
 }
 
-// TestCreateModuleFromAST tests creating a module from AST
+// TestCreateModuleFromAST verifies that the Create function correctly
+// parses an AST and creates a module with proper source files and dependencies.
 func TestCreateModuleFromAST(t *testing.T) {
 	resetRegistry()
 
@@ -195,7 +233,8 @@ func TestCreateModuleFromAST(t *testing.T) {
 	}
 }
 
-// TestCreateUnknownType tests creating module with unknown type
+// TestCreateUnknownType verifies that Create returns an error when
+// attempting to create a module with an unregistered type.
 func TestCreateUnknownType(t *testing.T) {
 	resetRegistry()
 
@@ -206,6 +245,9 @@ func TestCreateUnknownType(t *testing.T) {
 	}
 }
 
+// TestCreateModulePreservesDependencyFields verifies that dependencies
+// from all three dependency properties (deps, shared_libs, header_libs)
+// are correctly combined into a single dependency list.
 func TestCreateModulePreservesDependencyFields(t *testing.T) {
 	resetRegistry()
 	Register("cc_binary", &CCBinaryFactory{})
@@ -231,6 +273,8 @@ func TestCreateModulePreservesDependencyFields(t *testing.T) {
 	}
 }
 
+// TestCreateModulePreservesStructuredProps verifies that complex property
+// types (nested maps and lists) are correctly preserved during module creation.
 func TestCreateModulePreservesStructuredProps(t *testing.T) {
 	resetRegistry()
 	Register("cc_binary", &CCBinaryFactory{})
@@ -274,6 +318,9 @@ func TestCreateModulePreservesStructuredProps(t *testing.T) {
 	}
 }
 
+// TestCoreSupportedModuleTypesAreRegistered verifies that all built-in
+// module types are correctly registered and can be instantiated.
+// It tests each known module type against the registered factories.
 func TestCoreSupportedModuleTypesAreRegistered(t *testing.T) {
 	snapshot := registrySnapshot()
 	defer restoreRegistry(snapshot)
@@ -329,6 +376,8 @@ func TestCoreSupportedModuleTypesAreRegistered(t *testing.T) {
 	}
 }
 
+// TestRegistryConcurrentAccess verifies that the registry is thread-safe
+// by concurrently registering and looking up multiple module types.
 func TestRegistryConcurrentAccess(t *testing.T) {
 	snapshot := registrySnapshot()
 	defer restoreRegistry(snapshot)

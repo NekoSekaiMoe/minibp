@@ -1,4 +1,6 @@
 // ninja/rules.go - Ninja rule definitions for minibp
+// This file defines all the build rules for different module types.
+// Each rule implements the BuildRule interface to generate Ninja syntax.
 package ninja
 
 import (
@@ -11,24 +13,38 @@ import (
 	"minibp/parser"
 )
 
-// BuildRule is the interface for all ninja rule implementations
+// BuildRule is the interface for all ninja rule implementations.
+// Each module type (cc_library, go_binary, java_library, etc.) implements this interface
+// to translate module definitions into Ninja build file syntax.
 type BuildRule interface {
+	// Name returns the rule module type name (e.g., "cc_library", "go_binary").
 	Name() string
+	// NinjaRule returns the Ninja rule definitions for this build rule.
+	// This outputs the "rule" declarations that define how to build outputs.
 	NinjaRule(ctx RuleRenderContext) string
+	// NinjaEdge returns the Ninja build edges for a module.
+	// This outputs the "build" declarations that define specific build steps.
 	NinjaEdge(m *parser.Module, ctx RuleRenderContext) string
+	// Outputs returns the output files produced by this module.
 	Outputs(m *parser.Module, ctx RuleRenderContext) []string
+	// Desc returns a description of what action is performed.
+	// This is used for generating comments in the build file.
 	Desc(m *parser.Module, srcFile string) string
 }
 
+// RuleRenderContext holds the toolchain configuration for rendering rules.
+// This includes compilers, archivers, and flag configurations.
 type RuleRenderContext struct {
-	CC         string
-	CXX        string
-	AR         string
-	ArchSuffix string
-	CFlags     string
-	LdFlags    string
+	CC         string // C compiler command (e.g., gcc, clang)
+	CXX        string // C++ compiler command (e.g., g++, clang++)
+	AR         string // Static library archiver (e.g., ar)
+	ArchSuffix string // Architecture suffix for output files (e.g., "_x86_64")
+	CFlags     string // Global C/C++ compiler flags
+	LdFlags    string // Global linker flags
 }
 
+// DefaultRuleRenderContext returns a RuleRenderContext with default toolchain values.
+// Uses common GNU/Linux development tools as defaults.
 func DefaultRuleRenderContext() RuleRenderContext {
 	return RuleRenderContext{
 		CC:  "gcc",
@@ -37,18 +53,28 @@ func DefaultRuleRenderContext() RuleRenderContext {
 	}
 }
 
+// libOutputName generates the output name for a library.
+// It prefixes the name with "lib" and adds the architecture suffix and extension.
+// This follows the Unix convention of lib<name>.so or lib<name>.a.
 func libOutputName(name, archSuffix, ext string) string {
 	return "lib" + name + archSuffix + ext
 }
 
+// sharedLibOutputName generates the output name for a shared library (.so).
+// Uses .so extension with architecture suffix.
 func sharedLibOutputName(name string, ctx RuleRenderContext) string {
 	return libOutputName(name, ctx.ArchSuffix, ".so")
 }
 
+// staticLibOutputName generates the output name for a static library (.a).
+// Uses .a extension with architecture suffix.
 func staticLibOutputName(name string, ctx RuleRenderContext) string {
 	return libOutputName(name, ctx.ArchSuffix, ".a")
 }
 
+// GetStringProp retrieves a string property value from a module.
+// Looks up the property by name and returns its string value.
+// Returns empty string if the property doesn't exist or isn't a string.
 func GetStringProp(m *parser.Module, name string) string {
 	if m.Map == nil {
 		return ""
@@ -63,6 +89,10 @@ func GetStringProp(m *parser.Module, name string) string {
 	return ""
 }
 
+// GetStringPropEval retrieves a string property value with optional evaluation.
+// If the property is a string, returns its value directly.
+// If an evaluator is provided, attempts to evaluate the property value.
+// This is useful for properties that can contain template expressions.
 func GetStringPropEval(m *parser.Module, name string, eval *parser.Evaluator) string {
 	if m.Map == nil {
 		return ""
@@ -83,6 +113,9 @@ func GetStringPropEval(m *parser.Module, name string, eval *parser.Evaluator) st
 	return ""
 }
 
+// getBoolProp retrieves a boolean property value from a module.
+// Looks up the property by name and returns its boolean value.
+// Returns false if the property doesn't exist or isn't a boolean.
 func getBoolProp(m *parser.Module, name string) bool {
 	if m.Map == nil {
 		return false
@@ -97,6 +130,9 @@ func getBoolProp(m *parser.Module, name string) bool {
 	return false
 }
 
+// GetListProp retrieves a list property value from a module.
+// Looks up the property by name and returns a slice of strings.
+// Returns nil if the property doesn't exist or isn't a list.
 func GetListProp(m *parser.Module, name string) []string {
 	if m.Map == nil {
 		return nil
@@ -117,6 +153,9 @@ func GetListProp(m *parser.Module, name string) []string {
 	return nil
 }
 
+// GetListPropEval retrieves a list property value with optional evaluation.
+// If an evaluator is provided, evaluates each element in the list.
+// Returns nil if the property doesn't exist or isn't a list.
 func GetListPropEval(m *parser.Module, name string, eval *parser.Evaluator) []string {
 	if m.Map == nil {
 		return nil
@@ -131,17 +170,49 @@ func GetListPropEval(m *parser.Module, name string, eval *parser.Evaluator) []st
 	return nil
 }
 
-func getCflags(m *parser.Module) string              { return strings.Join(GetListProp(m, "cflags"), " ") }
-func getCppflags(m *parser.Module) string            { return strings.Join(GetListProp(m, "cppflags"), " ") }
-func getLdflags(m *parser.Module) string             { return strings.Join(GetListProp(m, "ldflags"), " ") }
-func getGoflags(m *parser.Module) string             { return strings.Join(GetListProp(m, "goflags"), " ") }
-func getJavaflags(m *parser.Module) string           { return strings.Join(GetListProp(m, "javaflags"), " ") }
-func getExportIncludeDirs(m *parser.Module) []string { return GetListProp(m, "export_include_dirs") }
-func getExportedHeaders(m *parser.Module) []string   { return GetListProp(m, "exported_headers") }
-func getName(m *parser.Module) string                { return GetStringProp(m, "name") }
-func getSrcs(m *parser.Module) []string              { return GetListProp(m, "srcs") }
-func formatSrcs(srcs []string) string                { return strings.Join(srcs, " ") }
+// getCflags retrieves C compiler flags from a module.
+// Combines all cflags property values into a single space-separated string.
+func getCflags(m *parser.Module) string { return strings.Join(GetListProp(m, "cflags"), " ") }
 
+// getCppflags retrieves C++ compiler flags from a module.
+// Combines all cppflags property values into a single space-separated string.
+func getCppflags(m *parser.Module) string { return strings.Join(GetListProp(m, "cppflags"), " ") }
+
+// getLdflags retrieves linker flags from a module.
+// Combines all ldflags property values into a single space-separated string.
+func getLdflags(m *parser.Module) string { return strings.Join(GetListProp(m, "ldflags"), " ") }
+
+// getGoflags retrieves Go compiler flags from a module.
+// Combines all goflags property values into a single space-separated string.
+func getGoflags(m *parser.Module) string { return strings.Join(GetListProp(m, "goflags"), " ") }
+
+// getJavaflags retrieves Java compiler flags from a module.
+// Combines all javaflags property values into a single space-separated string.
+func getJavaflags(m *parser.Module) string { return strings.Join(GetListProp(m, "javaflags"), " ") }
+
+// getExportIncludeDirs retrieves exported include directories from a module.
+// These are directories that should be added to dependent modules' include paths.
+func getExportIncludeDirs(m *parser.Module) []string { return GetListProp(m, "export_include_dirs") }
+
+// getExportedHeaders retrieves exported header files from a module.
+// These are header files that should be available to dependent modules.
+func getExportedHeaders(m *parser.Module) []string { return GetListProp(m, "exported_headers") }
+
+// getName retrieves the module name from a module.
+func getName(m *parser.Module) string { return GetStringProp(m, "name") }
+
+// getSrcs retrieves source file paths from a module.
+func getSrcs(m *parser.Module) []string { return GetListProp(m, "srcs") }
+
+// formatSrcs combines source file paths into a single space-separated string.
+func formatSrcs(srcs []string) string { return strings.Join(srcs, " ") }
+
+// objectOutputName generates a unique object file name for a source file.
+// It transforms the source path into a valid object file name by:
+// - Removing path prefixes (./ and ../)
+// - Replacing path separators, colons, and spaces with underscores
+// - Appending the module name as a prefix
+// This ensures unique output files even for sources with the same base name in different directories.
 func objectOutputName(moduleName, src string) string {
 	clean := filepath.Clean(src)
 	clean = strings.TrimPrefix(clean, "./")
@@ -156,6 +227,8 @@ func objectOutputName(moduleName, src string) string {
 	return moduleName + "_" + name + ".o"
 }
 
+// joinFlags combines multiple flag strings into a single space-separated string.
+// Empty flags are filtered out to avoid adding unnecessary spaces to commands.
 func joinFlags(parts ...string) string {
 	filtered := make([]string, 0, len(parts))
 	for _, part := range parts {
@@ -170,9 +243,18 @@ func joinFlags(parts ...string) string {
 // ============================================================================
 // cc_library - C library (static by default, shared if shared: true)
 // ============================================================================
+
+// ccLibrary implements a C/C++ library rule that can be either static or shared.
+// By default, produces a static library (.a). If "shared: true" is set,
+// produces a shared library (.so) instead.
 type ccLibrary struct{}
 
+// Name returns "cc_library" for this build rule.
 func (r *ccLibrary) Name() string { return "cc_library" }
+
+// NinjaRule returns the Ninja rule definitions for compiling and archiving C code.
+// Defines three rules: cc_compile (compile .c to .o), cc_archive (create static lib),
+// and cc_shared (create shared library).
 func (r *ccLibrary) NinjaRule(ctx RuleRenderContext) string {
 	return fmt.Sprintf(`rule cc_compile
   command = %s -c $in -o $out $flags -MMD -MF $out.d
@@ -187,9 +269,14 @@ rule cc_shared
  `, ctx.CC, ctx.AR, ctx.CC)
 }
 
+// ccLibraryStatic implements a C static library rule (always produces .a).
 type ccLibraryStatic struct{}
 
+// Name returns "cc_library_static" for this build rule.
 func (r *ccLibraryStatic) Name() string { return "cc_library_static" }
+
+// NinjaRule returns the Ninja rule definitions for compiling and archiving C code.
+// Only defines cc_compile and cc_archive rules (no shared library support).
 func (r *ccLibraryStatic) NinjaRule(ctx RuleRenderContext) string {
 	return fmt.Sprintf(`rule cc_compile
   command = %s -c $in -o $out $flags -MMD -MF $out.d
@@ -201,9 +288,15 @@ rule cc_archive
  `, ctx.CC, ctx.AR)
 }
 
+// ccLibraryShared implements a C shared library rule (always produces .so).
+// Unlike ccLibrary, this always produces a shared library, never static.
 type ccLibraryShared struct{}
 
+// Name returns "cc_library_shared" for this build rule.
 func (r *ccLibraryShared) Name() string { return "cc_library_shared" }
+
+// NinjaRule returns the Ninja rule definitions for compiling C code and creating shared libs.
+// Defines cc_compile and cc_shared rules (no archive rule).
 func (r *ccLibraryShared) NinjaRule(ctx RuleRenderContext) string {
 	return fmt.Sprintf(`rule cc_compile
   command = %s -c $in -o $out $flags -MMD -MF $out.d
@@ -215,6 +308,10 @@ rule cc_shared
  `, ctx.CC, ctx.CC)
 }
 
+// Outputs returns the output files produced by a cc_library module.
+// If the "shared" property is true, returns the .so file path.
+// Otherwise, returns the .a file path.
+// The output name includes any architecture suffix.
 func (r *ccLibrary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
@@ -227,6 +324,10 @@ func (r *ccLibrary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	return []string{fmt.Sprintf("lib%s%s.a", name, suffix)}
 }
 
+// NinjaEdge generates the build edges for a cc_library module.
+// For each source file, creates a compile edge to produce an object file.
+// Then creates either an archive edge (for static) or shared library edge (for shared).
+// Handles shared_libs dependencies when building shared libraries.
 func (r *ccLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
@@ -264,6 +365,9 @@ func (r *ccLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	return edges.String()
 }
 
+// Desc returns a description of the action performed by this module.
+// For source files, returns "gcc" (compiler).
+// For the library output, returns "ar" (archiver) or "cc_shared".
 func (r *ccLibrary) Desc(m *parser.Module, srcFile string) string {
 	if srcFile == "" {
 		if getBoolProp(m, "shared") {
@@ -277,6 +381,8 @@ func (r *ccLibrary) Desc(m *parser.Module, srcFile string) string {
 // ============================================================================
 // cc_library_static
 // ============================================================================
+
+// Outputs returns the static library output file path for a cc_library_static module.
 func (r *ccLibraryStatic) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
@@ -284,6 +390,9 @@ func (r *ccLibraryStatic) Outputs(m *parser.Module, ctx RuleRenderContext) []str
 	}
 	return []string{fmt.Sprintf("lib%s%s.a", name, ctx.ArchSuffix)}
 }
+
+// NinjaEdge generates build edges for a static C library.
+// Compiles each source file to an object file, then archives them into a .a library.
 func (r *ccLibraryStatic) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
@@ -302,6 +411,9 @@ func (r *ccLibraryStatic) NinjaEdge(m *parser.Module, ctx RuleRenderContext) str
 	edges.WriteString(fmt.Sprintf("build %s: cc_archive %s\n", out, strings.Join(objFiles, " ")))
 	return edges.String()
 }
+
+// Desc returns a description for this build rule.
+// Returns "ar" for the library output, "gcc" for individual source files.
 func (r *ccLibraryStatic) Desc(m *parser.Module, srcFile string) string {
 	if srcFile == "" {
 		return "ar"
@@ -312,6 +424,8 @@ func (r *ccLibraryStatic) Desc(m *parser.Module, srcFile string) string {
 // ============================================================================
 // cc_library_shared
 // ============================================================================
+
+// Outputs returns the shared library output file path for a cc_library_shared module.
 func (r *ccLibraryShared) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
@@ -319,6 +433,9 @@ func (r *ccLibraryShared) Outputs(m *parser.Module, ctx RuleRenderContext) []str
 	}
 	return []string{fmt.Sprintf("lib%s%s.so", name, ctx.ArchSuffix)}
 }
+
+// NinjaEdge generates build edges for a shared C library.
+// Compiles each source file to an object file, then links them into a .so with shared library dependencies.
 func (r *ccLibraryShared) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
@@ -346,6 +463,9 @@ func (r *ccLibraryShared) NinjaEdge(m *parser.Module, ctx RuleRenderContext) str
 	edges.WriteString(fmt.Sprintf("build %s: cc_shared %s\n flags = %s\n", out, strings.Join(allInputs, " "), ldflags))
 	return edges.String()
 }
+
+// Desc returns a description for this build rule.
+// Returns "cc_shared" for the library output, "gcc" for individual source files.
 func (r *ccLibraryShared) Desc(m *parser.Module, srcFile string) string {
 	if srcFile == "" {
 		return "cc_shared"
@@ -356,9 +476,16 @@ func (r *ccLibraryShared) Desc(m *parser.Module, srcFile string) string {
 // ============================================================================
 // cc_object
 // ============================================================================
+
+// ccObject implements a C object file rule for compiling individual .c files to .o files.
+// Produces one object file per source file, which can be later linked into libraries or binaries.
 type ccObject struct{}
 
+// Name returns "cc_object" for this build rule.
 func (r *ccObject) Name() string { return "cc_object" }
+
+// NinjaRule returns the Ninja rule definition for compiling C files.
+// Uses the same cc_compile rule as cc_library.
 func (r *ccObject) NinjaRule(ctx RuleRenderContext) string {
 	return fmt.Sprintf(`rule cc_compile
   command = %s -c $in -o $out $flags -MMD -MF $out.d
@@ -366,6 +493,10 @@ func (r *ccObject) NinjaRule(ctx RuleRenderContext) string {
   deps = gcc
  `, ctx.CC)
 }
+
+// Outputs returns the object file outputs for a cc_object module.
+// If there's only one source, returns a simple output name.
+// If multiple sources, each gets a unique output based on its path.
 func (r *ccObject) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	srcs := getSrcs(m)
@@ -608,16 +739,25 @@ func (r *cppBinary) Desc(m *parser.Module, srcFile string) string {
 }
 
 // ============================================================================
-// go_library
+// go_library - Go library (.a)
 // ============================================================================
+
+// goLibrary implements a Go library rule that produces a .a archive file.
+// Uses Go's -buildmode=archive to create an archive for linking.
 type goLibrary struct{}
 
+// Name returns "go_library" for this build rule.
 func (r *goLibrary) Name() string { return "go_library" }
+
+// NinjaRule returns the Ninja rule for building Go archives.
+// Uses "go build -buildmode=archive" to create static archives.
 func (r *goLibrary) NinjaRule(ctx RuleRenderContext) string {
 	return `rule go_build_archive
  command = go build -buildmode=archive -o $out $in
-`
+ `
 }
+
+// Outputs returns the archive output file path for a go_library module.
 func (r *goLibrary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
@@ -625,6 +765,8 @@ func (r *goLibrary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	}
 	return []string{fmt.Sprintf("%s.a", name)}
 }
+
+// NinjaEdge generates the build edge for a Go library.
 func (r *goLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
@@ -635,19 +777,29 @@ func (r *goLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	out := r.Outputs(m, ctx)[0]
 	return fmt.Sprintf("build %s: go_build_archive %s\n flags = %s\n", out, strings.Join(srcs, " "), goflags)
 }
+
+// Desc returns a description for this build rule.
 func (r *goLibrary) Desc(m *parser.Module, srcFile string) string { return "go" }
 
 // ============================================================================
-// go_binary
+// go_binary - Go executable
 // ============================================================================
+
+// goBinary implements a Go binary rule that produces an executable.
 type goBinary struct{}
 
+// Name returns "go_binary" for this build rule.
 func (r *goBinary) Name() string { return "go_binary" }
+
+// NinjaRule returns the Ninja rule for building Go binaries.
+// Uses "go build" to create executables.
 func (r *goBinary) NinjaRule(ctx RuleRenderContext) string {
 	return `rule go_build
  command = go build -o $out $in
-`
+ `
 }
+
+// Outputs returns the executable output file path for a go_binary module.
 func (r *goBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
@@ -655,6 +807,9 @@ func (r *goBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	}
 	return []string{name}
 }
+
+// NinjaEdge generates the build edge for a Go binary.
+// Includes dependencies as order-only dependencies (using | syntax).
 func (r *goBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
@@ -678,6 +833,8 @@ func (r *goBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	}
 	return fmt.Sprintf("build %s: go_build %s\n flags = %s\n", out, srcStr, goflags)
 }
+
+// Desc returns a description for this build rule.
 func (r *goBinary) Desc(m *parser.Module, srcFile string) string { return "go" }
 
 // ============================================================================

@@ -5,19 +5,48 @@ import (
 	"testing"
 )
 
-// MockModule implements module.Module for testing
+// MockModule implements module.Module interface for testing purposes.
+// This struct provides a simple test double that satisfies the Module
+// interface, allowing tests to create modules without implementing
+// actual build logic. It stores a name and optional list of dependencies.
 type MockModule struct {
+	// name is the identifier for this module
 	name string
+	// deps stores the list of dependency names for this module
 	deps []string
 }
 
-func (m *MockModule) Name() string                   { return m.name }
-func (m *MockModule) Type() string                   { return "mock" }
-func (m *MockModule) Srcs() []string                 { return nil }
-func (m *MockModule) Deps() []string                 { return m.deps }
-func (m *MockModule) Props() map[string]interface{}  { return nil }
+// Name returns the name of the mock module.
+// Implements the module.Module interface.
+func (m *MockModule) Name() string { return m.name }
+
+// Type returns the module type identifier.
+// Returns "mock" for all MockModule instances.
+// Implements the module.Module interface.
+func (m *MockModule) Type() string { return "mock" }
+
+// Srcs returns the source files for this module.
+// Returns nil as MockModule doesn't track sources.
+// Implements the module.Module interface.
+func (m *MockModule) Srcs() []string { return nil }
+
+// Deps returns the list of dependencies for this module.
+// Returns the stored deps slice which may be empty.
+// Implements the module.Module interface.
+func (m *MockModule) Deps() []string { return m.deps }
+
+// Props returns module properties as a map.
+// Returns nil as MockModule doesn't use properties.
+// Implements the module.Module interface.
+func (m *MockModule) Props() map[string]interface{} { return nil }
+
+// GetProp retrieves a property value by key.
+// Returns nil as MockModule doesn't store properties.
+// Implements the module.Module interface.
 func (m *MockModule) GetProp(key string) interface{} { return nil }
 
+// TestNewGraph verifies that NewGraph creates an empty graph
+// with nil modules and edges maps properly initialized.
 func TestNewGraph(t *testing.T) {
 	g := NewGraph()
 	if g == nil {
@@ -28,6 +57,8 @@ func TestNewGraph(t *testing.T) {
 	}
 }
 
+// TestAddModule verifies that AddModule correctly adds a module to the graph.
+// It creates a mock module and checks that it can be retrieved from the graph.
 func TestAddModule(t *testing.T) {
 	g := NewGraph()
 	m := &MockModule{name: "A", deps: []string{"B"}}
@@ -38,6 +69,9 @@ func TestAddModule(t *testing.T) {
 	}
 }
 
+// TestAddEdge verifies that AddEdge correctly establishes a dependency
+// relationship between two modules. After adding edge "A" -> "B",
+// A should have B as a dependency.
 func TestAddEdge(t *testing.T) {
 	g := NewGraph()
 	g.AddEdge("A", "B")
@@ -48,6 +82,9 @@ func TestAddEdge(t *testing.T) {
 	}
 }
 
+// TestGetDeps verifies that GetDeps returns the correct dependencies
+// for a module. It tests both the case where a module has dependencies
+// and the case where the module doesn't exist (should return empty slice).
 func TestGetDeps(t *testing.T) {
 	g := NewGraph()
 	g.AddEdge("A", "B")
@@ -65,6 +102,9 @@ func TestGetDeps(t *testing.T) {
 	}
 }
 
+// TestTopoSort verifies the topological sorting of a complex dependency graph.
+// It creates a diamond-shaped dependency: A depends on B and C, both B and C depend on D.
+// Expected result: [[D], [B, C], [A]] - modules grouped by levels for parallel execution.
 func TestTopoSort(t *testing.T) {
 	g := NewGraph()
 
@@ -107,6 +147,10 @@ func TestTopoSort(t *testing.T) {
 	}
 }
 
+// TestCycleDetection verifies that TopoSort correctly detects cycles in the dependency graph.
+// A cycle exists when modules depend on each other in a circular manner (e.g., A -> B -> A).
+// The function should return an error when a cycle is detected since topological sorting
+// is only possible for directed acyclic graphs (DAGs).
 func TestCycleDetection(t *testing.T) {
 	g := NewGraph()
 
@@ -123,6 +167,9 @@ func TestCycleDetection(t *testing.T) {
 	}
 }
 
+// TestTopoSortSelfDependency verifies that self-referencing dependencies (a module
+// depending on itself) are detected as cycles. A self-cycle makes topological
+// sorting impossible and should return an error.
 func TestTopoSortSelfDependency(t *testing.T) {
 	g := NewGraph()
 
@@ -137,6 +184,9 @@ func TestTopoSortSelfDependency(t *testing.T) {
 	}
 }
 
+// TestTopoSortMissingDependency verifies that TopoSort returns an error when a module
+// depends on a non-existent module. This catches cases where a dependency is referenced
+// but was never added to the graph as an actual module.
 func TestTopoSortMissingDependency(t *testing.T) {
 	g := NewGraph()
 
@@ -151,6 +201,9 @@ func TestTopoSortMissingDependency(t *testing.T) {
 	}
 }
 
+// TestTopoSortMissingSourceModule verifies that TopoSort returns an error when an edge
+// is added from a module that was never added to the graph. This tests the validation
+// that all source nodes in the dependency graph must be actual modules.
 func TestTopoSortMissingSourceModule(t *testing.T) {
 	g := NewGraph()
 	g.AddModule(&MockModule{name: "B"})
@@ -164,6 +217,9 @@ func TestTopoSortMissingSourceModule(t *testing.T) {
 	}
 }
 
+// TestTopoSortLinearChain verifies topological sorting of a linear dependency chain
+// where each module depends on exactly one other module (A -> B -> C -> D).
+// Expected result: [[D], [C], [B], [A]] - each level contains exactly one module.
 func TestTopoSortLinearChain(t *testing.T) {
 	g := NewGraph()
 
@@ -195,6 +251,9 @@ func TestTopoSortLinearChain(t *testing.T) {
 	}
 }
 
+// TestTopoSortIndependentModules verifies that modules with no dependencies
+// are all placed at level 0 and sorted alphabetically. This tests the case
+// where the graph contains only independent modules with no edges between them.
 func TestTopoSortIndependentModules(t *testing.T) {
 	g := NewGraph()
 

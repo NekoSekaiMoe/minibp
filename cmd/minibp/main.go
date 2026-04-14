@@ -1,3 +1,5 @@
+// Package main implements minibp, a build system that generates Ninja build files from Blueprint definitions.
+// It parses .bp files, resolves dependencies, handles architecture variants, and outputs build.ninja.
 package main
 
 import (
@@ -13,17 +15,23 @@ import (
 	"minibp/parser"
 )
 
+// openInputFile is a dependency injection for opening input files.
+// It defaults to os.Open but can be replaced for testing.
 var (
 	openInputFile      = func(path string) (io.ReadCloser, error) { return os.Open(path) }
 	createOutputFile   = func(path string) (io.WriteCloser, error) { return os.Create(path) }
 	parseBlueprintFile = parser.ParseFile
 )
 
+// Graph represents a module dependency graph used for topological sorting.
+// nodes maps module names to their parsed Module definitions.
+// edges maps module names to lists of their direct dependencies.
 type Graph struct {
 	nodes map[string]*parser.Module
 	edges map[string][]string
 }
 
+// NewGraph creates a new empty Graph with initialized maps for nodes and edges.
 func NewGraph() *Graph {
 	return &Graph{
 		nodes: make(map[string]*parser.Module),
@@ -31,6 +39,8 @@ func NewGraph() *Graph {
 	}
 }
 
+// AddNode adds a module node to the graph with the given name.
+// If the node already exists, it will be replaced.
 func (g *Graph) AddNode(name string, mod *parser.Module) {
 	g.nodes[name] = mod
 	if _, ok := g.edges[name]; !ok {
@@ -38,6 +48,8 @@ func (g *Graph) AddNode(name string, mod *parser.Module) {
 	}
 }
 
+// AddEdge adds a directed edge from the 'from' module to the 'to' module.
+// Both nodes must exist in the graph; if not, they are initialized with empty dependency lists.
 func (g *Graph) AddEdge(from, to string) {
 	if _, ok := g.edges[from]; !ok {
 		g.edges[from] = []string{}
@@ -48,12 +60,17 @@ func (g *Graph) AddEdge(from, to string) {
 	g.edges[from] = append(g.edges[from], to)
 }
 
+// TopoSort performs a topological sort on the module dependency graph.
+// It returns a slice of levels, where each level contains module names that can be built in parallel.
+// The algorithm uses Kahn's algorithm with topological levels to handle parallelizable nodes.
+// Returns an error if there's a circular dependency or if referenced modules don't exist.
 func (g *Graph) TopoSort() ([][]string, error) {
 	inDegree := make(map[string]int)
 	for name := range g.nodes {
 		inDegree[name] = 0
 	}
 
+	// Validate all edges reference existing nodes and calculate in-degrees
 	for from, deps := range g.edges {
 		if _, ok := g.nodes[from]; !ok {
 			return nil, fmt.Errorf("module '%s' referenced in dependency graph does not exist", from)
@@ -66,6 +83,7 @@ func (g *Graph) TopoSort() ([][]string, error) {
 		}
 	}
 
+	// Build reverse edges map: for each node, track which nodes depend on it
 	reverseEdges := make(map[string][]string)
 	for from, deps := range g.edges {
 		for _, to := range deps {
@@ -77,6 +95,7 @@ func (g *Graph) TopoSort() ([][]string, error) {
 	visited := make(map[string]bool)
 	nodeCount := len(g.nodes)
 
+	// Process levels: each iteration finds all nodes with no remaining dependencies
 	for len(visited) < nodeCount {
 		var currentLevel []string
 		for name, degree := range inDegree {
@@ -85,13 +104,16 @@ func (g *Graph) TopoSort() ([][]string, error) {
 			}
 		}
 
+		// No nodes with zero in-degree means circular dependency
 		if len(currentLevel) == 0 {
 			return nil, fmt.Errorf("circular dependency detected")
 		}
 
+		// Sort for deterministic ordering within each level
 		sort.Strings(currentLevel)
 
 		levels = append(levels, currentLevel)
+		// Mark current level as visited and decrement in-degrees of dependent nodes
 		for _, name := range currentLevel {
 			visited[name] = true
 			for _, dependent := range reverseEdges[name] {
@@ -103,6 +125,9 @@ func (g *Graph) TopoSort() ([][]string, error) {
 	return levels, nil
 }
 
+// main is the entry point for the minibp command-line tool.
+// It parses command-line flags, loads Blueprint definitions, and generates a Ninja build file.
+// On success, it exits with code 0; on failure, it exits with code 1 and prints an error to stderr.
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -110,6 +135,8 @@ func main() {
 	}
 }
 
+// run is the main logic function that processes command-line arguments and generates the build file.
+// It handles flag parsing, Blueprint file loading, dependency resolution, variant merging, and Ninja file generation.
 func run(args []string, stdout, stderr io.Writer) error {
 	var (
 		fs       = flag.NewFlagSet("minibp", flag.ContinueOnError)
@@ -127,11 +154,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
+	// Validate that we have input files
 	if len(fs.Args()) < 1 && !*all {
 		fmt.Fprintln(stderr, "Usage: minibp [-o output] [-a] [-cc CC] [-cxx CXX] [-ar AR] [-arch ARCH] [-host] [-os OS] <file.bp | directory>")
 		return fmt.Errorf("missing input path")
 	}
 
+	// Determine source directory from arguments
 	srcDir := "."
 	if *all && len(fs.Args()) > 0 {
 		srcDir = fs.Args()[0]
@@ -139,6 +168,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		srcDir = filepath.Dir(fs.Args()[0])
 	}
 
+	// Collect Blueprint files to process
 	var files []string
 	if *all {
 		bpFiles, err := filepath.Glob(filepath.Join(srcDir, "*.bp"))
@@ -150,6 +180,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		files = fs.Args()
 	}
 
+	// Create evaluator with configuration for architecture and OS
 	eval := parser.NewEvaluator()
 	eval.SetConfig("arch", *archFlag)
 	eval.SetConfig("host", fmt.Sprintf("%v", *hostFlag))
@@ -160,13 +191,16 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	eval.SetConfig("target", *archFlag)
 
+	// Parse all Blueprint files into definitions
 	allDefs, err := parseDefinitionsFromFiles(files)
 	if err != nil {
 		return err
 	}
 
+	// Process variable assignments in definitions
 	eval.ProcessAssignmentsFromDefs(allDefs)
 
+	// Process each module definition
 	modules := make(map[string]*parser.Module)
 	for _, def := range allDefs {
 		mod, ok := def.(*parser.Module)
@@ -178,6 +212,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 			continue
 		}
 
+		// Evaluate module expressions, merge variant properties, expand globs
 		eval.EvalModule(mod)
 		mergeVariantProps(mod, *archFlag, *hostFlag, eval)
 		if err := expandGlobsInModule(mod, srcDir); err != nil {
@@ -186,11 +221,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 		modules[name] = mod
 	}
 
+	// Build dependency graph from modules
 	graph := NewGraph()
 	for name, mod := range modules {
 		graph.AddNode(name, mod)
 	}
 
+	// Add edges for each dependency type: deps, shared_libs, header_libs
 	for name, mod := range modules {
 		deps := getListPropEval(mod, "deps", eval)
 		for _, dep := range deps {
@@ -209,12 +246,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 
+	// Build map of available build rules
 	rules := ninja.GetAllRules()
 	ruleMap := make(map[string]ninja.BuildRule)
 	for _, r := range rules {
 		ruleMap[r.Name()] = r
 	}
 
+	// Calculate relative path prefix for paths when output dir differs from source dir
 	absOutFile, _ := filepath.Abs(*outFile)
 	absBuildDir := filepath.Dir(absOutFile)
 	absSourceDir, _ := filepath.Abs(srcDir)
@@ -229,11 +268,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 	outDir := filepath.Dir(absOutFile)
 
+	// Create generator and configure it
 	gen := ninja.NewGenerator(graph, ruleMap, modules)
 	gen.SetSourceDir(srcDir)
 	gen.SetOutputDir(outDir)
 	gen.SetPathPrefix(prefix)
 
+	// Set up automatic regeneration command
 	regenCmd := os.Args[0] + " -o " + *outFile
 	for _, f := range files {
 		regenCmd += " " + f
@@ -241,6 +282,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	gen.SetRegen(regenCmd, files, *outFile)
 	gen.SetWorkDir(srcDir)
 
+	// Configure toolchain with custom compilers if provided
 	tc := ninja.DefaultToolchain()
 	if *ccFlag != "" {
 		tc.CC = *ccFlag
@@ -254,6 +296,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	gen.SetToolchain(tc)
 	gen.SetArch(*archFlag)
 
+	// Generate and write the Ninja build file
 	if err := generateNinjaFile(*outFile, gen); err != nil {
 		return err
 	}
@@ -262,6 +305,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
+// parseDefinitionsFromFiles parses a list of Blueprint files and returns all definitions.
+// Each file is opened, parsed, and its definitions are collected into a single slice.
+// The function handles file closing properly even if parsing fails.
 func parseDefinitionsFromFiles(files []string) ([]parser.Definition, error) {
 	var allDefs []parser.Definition
 	for _, file := range files {
@@ -285,6 +331,8 @@ func parseDefinitionsFromFiles(files []string) ([]parser.Definition, error) {
 	return allDefs, nil
 }
 
+// generateNinjaFile creates an output file and generates a Ninja build file into it.
+// It handles proper file closing both on success and on generation errors.
 func generateNinjaFile(path string, gen interface{ Generate(io.Writer) error }) error {
 	out, err := createOutputFile(path)
 	if err != nil {
@@ -303,10 +351,14 @@ func generateNinjaFile(path string, gen interface{ Generate(io.Writer) error }) 
 	return nil
 }
 
+// getStringProp retrieves a string property from a module using the ninja helper.
 func getStringProp(m *parser.Module, name string) string {
 	return ninja.GetStringProp(m, name)
 }
 
+// getStringPropEval retrieves a string property from a module, optionally evaluating expressions.
+// If the property exists as a plain string, it returns the raw value.
+// If an evaluator is provided, it evaluates any expressions (variables, functions) in the property.
 func getStringPropEval(m *parser.Module, name string, eval *parser.Evaluator) string {
 	if m.Map == nil {
 		return ""
@@ -327,10 +379,12 @@ func getStringPropEval(m *parser.Module, name string, eval *parser.Evaluator) st
 	return ""
 }
 
+// getListProp retrieves a list property from a module using the ninja helper.
 func getListProp(m *parser.Module, name string) []string {
 	return ninja.GetListProp(m, name)
 }
 
+// getListPropEval retrieves a list property from a module, optionally evaluating expressions.
 func getListPropEval(m *parser.Module, name string, eval *parser.Evaluator) []string {
 	if m.Map == nil {
 		return nil
@@ -345,6 +399,9 @@ func getListPropEval(m *parser.Module, name string, eval *parser.Evaluator) []st
 	return nil
 }
 
+// mergeVariantProps merges architecture-specific, host-specific, and target-specific properties
+// into a module's base property map. It allows modules to define different configurations
+// for different build targets (e.g., arm64 vs x86_64) or for host vs target builds.
 func mergeVariantProps(m *parser.Module, arch string, host bool, eval *parser.Evaluator) {
 	if arch != "" && m.Arch != nil {
 		mergeMapProps(m, m.Arch[arch])
@@ -357,6 +414,8 @@ func mergeVariantProps(m *parser.Module, arch string, host bool, eval *parser.Ev
 	}
 }
 
+// mergeMapProps merges properties from an override map into a module's base property map.
+// Lists are appended (additive), while scalars are overridden (replaced).
 func mergeMapProps(m *parser.Module, override *parser.Map) {
 	if override == nil {
 		return
@@ -364,6 +423,7 @@ func mergeMapProps(m *parser.Module, override *parser.Map) {
 	for _, prop := range override.Properties {
 		switch prop.Value.(type) {
 		case *parser.List:
+			// For lists, append values to existing list if property exists
 			merged := false
 			for _, baseProp := range m.Map.Properties {
 				if baseProp.Name == prop.Name {
@@ -380,6 +440,7 @@ func mergeMapProps(m *parser.Module, override *parser.Map) {
 				m.Map.Properties = append(m.Map.Properties, prop)
 			}
 		default:
+			// For scalars, override existing property if found
 			found := false
 			for i, baseProp := range m.Map.Properties {
 				if baseProp.Name == prop.Name {
@@ -395,6 +456,9 @@ func mergeMapProps(m *parser.Module, override *parser.Map) {
 	}
 }
 
+// expandGlobsInModule expands glob patterns in a module's "srcs" property.
+// It converts glob patterns (e.g., "*.go", "src/**/*.go") into concrete file paths.
+// Patterns that don't match any files are dropped. Duplicate files are removed.
 func expandGlobsInModule(m *parser.Module, baseDir string) error {
 	if m.Map == nil {
 		return nil
@@ -409,11 +473,13 @@ func expandGlobsInModule(m *parser.Module, baseDir string) error {
 				for _, v := range l.Values {
 					if s, ok := v.(*parser.String); ok {
 						pattern := s.Value
+						// Check if the value contains glob characters
 						if strings.Contains(pattern, "*") {
 							matches, err := expandGlob(pattern, baseDir)
 							if err != nil {
 								return err
 							}
+							// Add each matching file, deduplicating
 							for _, match := range matches {
 								if !seen[match] {
 									seen[match] = true
@@ -421,6 +487,7 @@ func expandGlobsInModule(m *parser.Module, baseDir string) error {
 								}
 							}
 						} else {
+							// Non-glob values are kept as-is
 							if !seen[pattern] {
 								seen[pattern] = true
 								expandedSrcs = append(expandedSrcs, v)
@@ -437,10 +504,15 @@ func expandGlobsInModule(m *parser.Module, baseDir string) error {
 	return nil
 }
 
+// expandGlob expands a single glob pattern into a list of matching file paths.
+// It handles both simple globs ("*.go") and recursive globs ("**/*.go").
+// Paths are returned relative to baseDir.
 func expandGlob(pattern, baseDir string) ([]string, error) {
 	var result []string
 
+	// Handle recursive glob patterns containing "**"
 	if strings.Contains(pattern, "**") {
+		// Determine the root directory to start walking from
 		walkDir := recursiveGlobRoot(pattern, baseDir)
 
 		err := filepath.Walk(walkDir, func(path string, info os.FileInfo, err error) error {
@@ -452,6 +524,7 @@ func expandGlob(pattern, baseDir string) ([]string, error) {
 				return err
 			}
 			relPath = filepath.ToSlash(relPath)
+			// Check if the relative path matches the recursive pattern
 			if matchRecursivePattern(filepath.ToSlash(pattern), relPath) {
 				result = append(result, relPath)
 			}
@@ -461,6 +534,7 @@ func expandGlob(pattern, baseDir string) ([]string, error) {
 			return nil, err
 		}
 	} else {
+		// Handle simple glob patterns using filepath.Glob
 		fullPattern := filepath.Join(baseDir, pattern)
 		matches, err := filepath.Glob(fullPattern)
 		if err != nil {
@@ -478,10 +552,13 @@ func expandGlob(pattern, baseDir string) ([]string, error) {
 	return result, nil
 }
 
+// recursiveGlobRoot finds the root directory to start walking from for recursive globs.
+// It extracts the non-glob prefix of the pattern to limit the walk scope.
 func recursiveGlobRoot(pattern, baseDir string) string {
 	parts := strings.Split(filepath.ToSlash(pattern), "/")
 	prefix := make([]string, 0, len(parts))
 	for _, part := range parts {
+		// Stop when we hit a glob pattern
 		if part == "**" || strings.ContainsAny(part, "*?[") {
 			break
 		}
@@ -494,12 +571,15 @@ func recursiveGlobRoot(pattern, baseDir string) string {
 	return root
 }
 
+// matchRecursivePattern checks if a path matches a recursive glob pattern.
+// It splits both pattern and path into parts and delegates to matchRecursiveParts.
 func matchRecursivePattern(pattern, path string) bool {
 	patternParts := splitGlobParts(pattern)
 	pathParts := splitGlobParts(path)
 	return matchRecursiveParts(patternParts, pathParts)
 }
 
+// splitGlobParts splits a path/pattern string by forward slashes into parts.
 func splitGlobParts(path string) []string {
 	if path == "" {
 		return nil
@@ -507,29 +587,38 @@ func splitGlobParts(path string) []string {
 	return strings.Split(path, "/")
 }
 
+// matchRecursiveParts recursively matches pattern parts against path parts.
+// It handles the "**" pattern which matches any number of directories.
 func matchRecursiveParts(patternParts, pathParts []string) bool {
+	// Empty pattern matches empty path
 	if len(patternParts) == 0 {
 		return len(pathParts) == 0
 	}
 
+	// "**" matches zero or more path components
 	if patternParts[0] == "**" {
+		// Try matching with "**" consuming nothing
 		if matchRecursiveParts(patternParts[1:], pathParts) {
 			return true
 		}
+		// Try matching with "**" consuming one path component at a time
 		if len(pathParts) == 0 {
 			return false
 		}
 		return matchRecursiveParts(patternParts, pathParts[1:])
 	}
 
+	// Non-empty pathParts required for non-"**" patterns
 	if len(pathParts) == 0 {
 		return false
 	}
 
+	// Match current pattern part against current path part
 	ok, err := filepath.Match(patternParts[0], pathParts[0])
 	if err != nil || !ok {
 		return false
 	}
 
+	// Continue with remaining parts
 	return matchRecursiveParts(patternParts[1:], pathParts[1:])
 }

@@ -5,6 +5,9 @@ import (
 	"testing"
 )
 
+// TestEvaluatorVariableResolution tests that variable references are correctly
+// resolved during evaluation. A variable assigned before a module should be
+// substituted in the module's properties.
 func TestEvaluatorVariableResolution(t *testing.T) {
 	input := `
 foo = "hello"
@@ -29,6 +32,8 @@ cc_binary {
 	}
 }
 
+// TestEvaluatorPlusEqual tests the += operator for variable concatenation.
+// It verifies that += correctly appends to existing string and list variables.
 func TestEvaluatorPlusEqual(t *testing.T) {
 	input := `
 flags = "-Wall"
@@ -60,6 +65,8 @@ cc_binary {
 	}
 }
 
+// TestEvaluatorStringConcatenation tests the + operator for string concatenation
+// in expressions. It verifies that "a" + "_" + "b" evaluates to "a_b".
 func TestEvaluatorStringConcatenation(t *testing.T) {
 	input := `cc_binary {
     name: "prefix" + "_" + "suffix",
@@ -93,6 +100,8 @@ func TestEvaluatorStringConcatenation(t *testing.T) {
 	}
 }
 
+// TestEvaluatorSelect tests the select() expression for conditional values.
+// It verifies that the correct case is selected based on the configuration (arch).
 func TestEvaluatorSelect(t *testing.T) {
 	input := `cc_binary {
     name: "test",
@@ -139,6 +148,9 @@ func TestEvaluatorSelect(t *testing.T) {
 	}
 }
 
+// TestEvaluatorSelectDefault tests that the default case is used when no
+// pattern matches the condition value. When arch is "x86_64" and only "arm"
+// and "default" patterns exist, the default should be returned.
 func TestEvaluatorSelectDefault(t *testing.T) {
 	input := `cc_binary {
     name: "test",
@@ -171,6 +183,9 @@ func TestEvaluatorSelectDefault(t *testing.T) {
 	}
 }
 
+// TestEvaluatorVariableInModuleProp tests that variables can be used within
+// module properties, including in lists. Variables should be resolved to their
+// values during evaluation.
 func TestEvaluatorVariableInModuleProp(t *testing.T) {
 	input := `
 base_cflags = "-Wall -Werror"
@@ -205,6 +220,9 @@ cc_library {
 	}
 }
 
+// TestEvaluatorStringInterpolationInAssignment tests string interpolation
+// using ${var} syntax in assignment values. Variables in ${...} should be
+// substituted with their values.
 func TestEvaluatorStringInterpolationInAssignment(t *testing.T) {
 	input := `
 base = "lib"
@@ -228,6 +246,8 @@ full = "${base}_static"`
 	}
 }
 
+// TestEvaluatorStringInterpolationInModuleProp tests string interpolation
+// in module property values. Variables inside ${...} should be substituted.
 func TestEvaluatorStringInterpolationInModuleProp(t *testing.T) {
 	input := `
 suffix = "world"
@@ -252,6 +272,9 @@ cc_binary {
 	}
 }
 
+// TestEvaluatorStringInterpolationUnknownVarPreserved tests that unknown
+// variable references in ${...} are preserved as-is rather than causing errors.
+// This allows templates with placeholders that may be filled later.
 func TestEvaluatorStringInterpolationUnknownVarPreserved(t *testing.T) {
 	eval := NewEvaluator()
 	got := eval.Eval(&String{Value: "pre_${missing}_post"})
@@ -265,6 +288,8 @@ func TestEvaluatorStringInterpolationUnknownVarPreserved(t *testing.T) {
 	}
 }
 
+// TestEvaluatorIntegerAddition tests the + operator for integer arithmetic.
+// It verifies that 1 + 2 correctly evaluates to 3.
 func TestEvaluatorIntegerAddition(t *testing.T) {
 	input := `sum = 1 + 2`
 
@@ -286,6 +311,8 @@ func TestEvaluatorIntegerAddition(t *testing.T) {
 	}
 }
 
+// TestEvaluatorListPlusEqualList tests += with a list on the right side.
+// It verifies that srcs += ["b.c", "c.c"] appends the list items to the existing list.
 func TestEvaluatorListPlusEqualList(t *testing.T) {
 	input := `
 srcs = ["a.c"]
@@ -316,6 +343,8 @@ srcs += ["b.c", "c.c"]`
 	}
 }
 
+// TestEvaluatorListPlusEqualScalar tests += with a scalar (string) on the right side.
+// It verifies that srcs += "b.c" appends a single item to the existing list.
 func TestEvaluatorListPlusEqualScalar(t *testing.T) {
 	input := `
 srcs = ["a.c"]
@@ -342,6 +371,9 @@ srcs += "b.c"`
 	}
 }
 
+// TestEvaluatorMixedAdditionUnsupported tests that mixing incompatible types
+// in addition (e.g., int + string) returns nil rather than panicking or producing
+// incorrect results.
 func TestEvaluatorMixedAdditionUnsupported(t *testing.T) {
 	got := evalOperator(int64(1), "x", '+')
 	if got != nil {
@@ -349,6 +381,9 @@ func TestEvaluatorMixedAdditionUnsupported(t *testing.T) {
 	}
 }
 
+// TestEvaluatorSelectUnknownConfigFallsBackToDefault tests that when a config
+// key has no value set, the default case is used. Without a config value,
+// the select should fall back to the default pattern.
 func TestEvaluatorSelectUnknownConfigFallsBackToDefault(t *testing.T) {
 	input := `cc_binary {
     name: "test",
@@ -377,6 +412,8 @@ func TestEvaluatorSelectUnknownConfigFallsBackToDefault(t *testing.T) {
 	}
 }
 
+// TestEvaluatorSelectWithOSCondition tests the select() function with the "os"
+// condition. It verifies that different values are selected based on the os config.
 func TestEvaluatorSelectWithOSCondition(t *testing.T) {
 	input := `cc_binary {
     name: "test",
@@ -406,6 +443,9 @@ func TestEvaluatorSelectWithOSCondition(t *testing.T) {
 	}
 }
 
+// TestEvaluatorSelectMatchesIntegerPattern tests that select() can match
+// integer pattern values, not just strings. This verifies pattern matching
+// works with numeric values.
 func TestEvaluatorSelectMatchesIntegerPattern(t *testing.T) {
 	input := `cc_binary {
     name: "test",
@@ -435,6 +475,9 @@ func TestEvaluatorSelectMatchesIntegerPattern(t *testing.T) {
 	}
 }
 
+// TestEvaluatorSelectMatchesBooleanPattern tests that select() can match
+// boolean pattern values (true/false). This verifies pattern matching works
+// with boolean condition values.
 func TestEvaluatorSelectMatchesBooleanPattern(t *testing.T) {
 	input := `cc_binary {
     name: "test",
@@ -464,6 +507,9 @@ func TestEvaluatorSelectMatchesBooleanPattern(t *testing.T) {
 	}
 }
 
+// TestEvaluatorSelectMultiPatternCase tests select() with multiple patterns
+// in a single case (e.g., "linux", "android": ["unix.c"]). The evaluator should
+// match either pattern and return the corresponding value.
 func TestEvaluatorSelectMultiPatternCase(t *testing.T) {
 	input := `cc_binary {
     name: "test",
@@ -492,6 +538,9 @@ func TestEvaluatorSelectMultiPatternCase(t *testing.T) {
 	}
 }
 
+// TestParseHostBlock tests parsing the host: {} block for host-specific
+// property overrides. The parser should extract host properties and store them
+// in the Module.Host field.
 func TestParseHostBlock(t *testing.T) {
 	input := `cc_library {
     name: "libfoo",
@@ -520,6 +569,9 @@ func TestParseHostBlock(t *testing.T) {
 	}
 }
 
+// TestParseTargetBlock tests parsing the target: {} block for target-specific
+// property overrides. The parser should extract target properties and store them
+// in the Module.Target field.
 func TestParseTargetBlock(t *testing.T) {
 	input := `cc_library {
     name: "libfoo",
@@ -545,6 +597,9 @@ func TestParseTargetBlock(t *testing.T) {
 	}
 }
 
+// TestParseArchHostTargetTogether tests that arch, host, and target blocks
+// can all appear in the same module. The parser should correctly extract
+// all three types of overrides while keeping them separate.
 func TestParseArchHostTargetTogether(t *testing.T) {
 	input := `cc_library {
     name: "libfoo",
@@ -579,6 +634,14 @@ func TestParseArchHostTargetTogether(t *testing.T) {
 	}
 }
 
+// findProp is a helper function that searches a map for a property by name.
+// It returns nil if the property is not found.
+// Parameters:
+//   - m: The Map to search
+//   - name: The property name to find
+//
+// Returns:
+//   - *Property: The matching property, or nil if not found
 func findProp(m *Map, name string) *Property {
 	for _, prop := range m.Properties {
 		if prop.Name == name {
