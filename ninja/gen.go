@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"minibp/parser"
@@ -205,8 +206,8 @@ func (g *Generator) Generate(w io.Writer) error {
 	nw.Comment("")
 
 	if g.regenCmd != "" && len(g.inputFiles) > 0 {
-		fmt.Fprintf(w, "rule regen\n command = %s\n\n", g.regenCmd)
-		fmt.Fprintf(w, "build %s: regen %s\n\n", g.outputFile, strings.Join(g.inputFiles, " "))
+		fmt.Fprintf(w, "rule regen\n command = %s\n\n", ninjaEscape(g.regenCmd))
+		fmt.Fprintf(w, "build %s: regen %s\n\n", ninjaEscape(g.outputFile), strings.Join(escapeList(g.inputFiles), " "))
 	}
 
 	if g.outputDir != "." && g.outputDir != "" {
@@ -347,7 +348,7 @@ func (g *Generator) Generate(w io.Writer) error {
 	}
 
 	if len(allOutputs) > 0 {
-		fmt.Fprintf(w, "\nrule clean\n command = rm -f %s\n", strings.Join(allOutputs, " "))
+		fmt.Fprintf(w, "\nrule clean\n command = %s\n", cleanCommand(allOutputs))
 		fmt.Fprintf(w, "\nbuild clean: clean\n")
 	}
 
@@ -387,6 +388,21 @@ func (g *Generator) Generate(w io.Writer) error {
 	}
 
 	return nil
+}
+
+func shellQuote(arg string) string {
+	return "\"" + strings.ReplaceAll(arg, "\"", "\\\"") + "\""
+}
+
+func cleanCommand(outputs []string) string {
+	quoted := make([]string, 0, len(outputs))
+	for _, out := range outputs {
+		quoted = append(quoted, shellQuote(out))
+	}
+	if runtime.GOOS == "windows" {
+		return "cmd /c del /q " + strings.Join(quoted, " ")
+	}
+	return "rm -f " + strings.Join(quoted, " ")
 }
 
 // addIncludesToEdge adds include directories to compile commands

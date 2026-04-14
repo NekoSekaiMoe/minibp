@@ -3,6 +3,7 @@ package ninja
 
 import (
 	"bytes"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -97,6 +98,49 @@ func TestWriterBuild(t *testing.T) {
 	output := buf.String()
 	if !strings.Contains(output, "build out.o: cc in.c") {
 		t.Errorf("Expected build edge in output, got: %s", output)
+	}
+}
+
+func TestWriterEscapesSpecialCharacters(t *testing.T) {
+	var buf bytes.Buffer
+	w := NewWriter(&buf)
+	w.Build("out dir/file:name", "cc", []string{"src dir/$in.c"}, nil)
+	output := buf.String()
+	if !strings.Contains(output, "out$ dir/file$:name") {
+		t.Fatalf("Expected escaped output path, got: %s", output)
+	}
+	if !strings.Contains(output, "src$ dir/$$in.c") {
+		t.Fatalf("Expected escaped input path, got: %s", output)
+	}
+}
+
+func TestCleanCommandQuotesOutputs(t *testing.T) {
+	cmd := cleanCommand([]string{"out dir/app", "lib$name.a"})
+	if runtime.GOOS == "windows" {
+		if !strings.Contains(cmd, "cmd /c del /q") {
+			t.Fatalf("Expected windows clean command, got: %s", cmd)
+		}
+	} else {
+		if !strings.Contains(cmd, "rm -f") {
+			t.Fatalf("Expected unix clean command, got: %s", cmd)
+		}
+	}
+	if !strings.Contains(cmd, "\"out dir/app\"") || !strings.Contains(cmd, "\"lib$name.a\"") {
+		t.Fatalf("Expected quoted outputs in clean command, got: %s", cmd)
+	}
+}
+
+func TestJavaImportRuleUsesPlatformCopyCommand(t *testing.T) {
+	r := &javaImport{}
+	rule := r.NinjaRule()
+	if runtime.GOOS == "windows" {
+		if !strings.Contains(rule, "cmd /c copy") {
+			t.Fatalf("Expected windows copy command, got: %s", rule)
+		}
+	} else {
+		if !strings.Contains(rule, "cp $in $out") {
+			t.Fatalf("Expected unix copy command, got: %s", rule)
+		}
 	}
 }
 

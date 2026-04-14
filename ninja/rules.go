@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"minibp/parser"
@@ -975,8 +976,12 @@ type javaImport struct{}
 
 func (r *javaImport) Name() string { return "java_import" }
 func (r *javaImport) NinjaRule() string {
+	copyCmd := "cp $in $out"
+	if runtime.GOOS == "windows" {
+		copyCmd = "cmd /c copy $in $out"
+	}
 	return `rule java_import
- command = cp $in $out
+ command = ` + copyCmd + `
 `
 }
 func (r *javaImport) Outputs(m *parser.Module) []string {
