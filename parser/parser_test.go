@@ -644,6 +644,32 @@ func TestParseInvalidTargetOverrideValue(t *testing.T) {
 	}
 }
 
+func TestParseInvalidStringLiteral(t *testing.T) {
+	input := "cc_binary {\n    name: \"unterminated\n}"
+
+	p := NewParser(strings.NewReader(input), "test.bp")
+	_, errs := p.Parse()
+
+	if len(errs) == 0 {
+		t.Fatal("Expected parse error for invalid string literal")
+	}
+}
+
+func TestParseMalformedSyntaxReportsError(t *testing.T) {
+	inputs := []string{
+		`cc_binary { name: "hello", srcs: ["main.c"]`,
+		`cc_binary { name "hello", }`,
+	}
+
+	for _, input := range inputs {
+		p := NewParser(strings.NewReader(input), "test.bp")
+		_, errs := p.Parse()
+		if len(errs) == 0 {
+			t.Fatalf("Expected parse error for malformed input: %q", input)
+		}
+	}
+}
+
 func TestParseExportedHeaders(t *testing.T) {
 	input := `cc_library {
     name: "libfoo",

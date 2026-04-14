@@ -349,6 +349,63 @@ func TestEvaluatorMixedAdditionUnsupported(t *testing.T) {
 	}
 }
 
+func TestEvaluatorSelectUnknownConfigFallsBackToDefault(t *testing.T) {
+	input := `cc_binary {
+    name: "test",
+    srcs: select(os, {
+        linux: ["linux.c"],
+        default: ["generic.c"],
+    }),
+}`
+
+	p := NewParser(strings.NewReader(input), "test.bp")
+	file, errs := p.Parse()
+	if len(errs) > 0 {
+		t.Fatalf("Parse errors: %v", errs)
+	}
+
+	eval := NewEvaluator()
+	mod := file.Defs[0].(*Module)
+	srcsProp := findProp(mod.Map, "srcs")
+	result := eval.Eval(srcsProp.Value)
+	list, ok := result.([]interface{})
+	if !ok {
+		t.Fatalf("Expected []interface{}, got %T", result)
+	}
+	if len(list) != 1 || list[0] != "generic.c" {
+		t.Fatalf("Expected [generic.c], got %v", list)
+	}
+}
+
+func TestEvaluatorSelectWithOSCondition(t *testing.T) {
+	input := `cc_binary {
+    name: "test",
+    srcs: select(os, {
+        linux: ["linux.c"],
+        default: ["generic.c"],
+    }),
+}`
+
+	p := NewParser(strings.NewReader(input), "test.bp")
+	file, errs := p.Parse()
+	if len(errs) > 0 {
+		t.Fatalf("Parse errors: %v", errs)
+	}
+
+	eval := NewEvaluator()
+	eval.SetConfig("os", "linux")
+	mod := file.Defs[0].(*Module)
+	srcsProp := findProp(mod.Map, "srcs")
+	result := eval.Eval(srcsProp.Value)
+	list, ok := result.([]interface{})
+	if !ok {
+		t.Fatalf("Expected []interface{}, got %T", result)
+	}
+	if len(list) != 1 || list[0] != "linux.c" {
+		t.Fatalf("Expected [linux.c], got %v", list)
+	}
+}
+
 func TestParseHostBlock(t *testing.T) {
 	input := `cc_library {
     name: "libfoo",
