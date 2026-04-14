@@ -424,3 +424,45 @@ func TestDepfileInCppRules(t *testing.T) {
 		t.Errorf("Expected depfile in cpp_binary compile rule, got: %s", rule2)
 	}
 }
+
+func TestCCSharedLibraryIncludesSharedDeps(t *testing.T) {
+	r := &ccLibrary{}
+	m := &parser.Module{
+		Type: "cc_library",
+		Map: &parser.Map{Properties: []*parser.Property{
+			{Name: "name", Value: &parser.String{Value: "app"}},
+			{Name: "shared", Value: &parser.Bool{Value: true}},
+			{Name: "srcs", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: "app.c"}}}},
+			{Name: "shared_libs", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: ":base"}}}},
+		}},
+	}
+
+	edge := r.NinjaEdge(m)
+	if !strings.Contains(edge, "build libapp.so: cc_shared app_app.o libbase.so") {
+		t.Fatalf("Expected shared library input dependency in edge, got: %s", edge)
+	}
+	if !strings.Contains(edge, "-lbase") {
+		t.Fatalf("Expected linker flag for shared dep, got: %s", edge)
+	}
+}
+
+func TestCppSharedLibraryIncludesSharedDeps(t *testing.T) {
+	r := &cppLibrary{}
+	m := &parser.Module{
+		Type: "cpp_library",
+		Map: &parser.Map{Properties: []*parser.Property{
+			{Name: "name", Value: &parser.String{Value: "app"}},
+			{Name: "shared", Value: &parser.Bool{Value: true}},
+			{Name: "srcs", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: "app.cpp"}}}},
+			{Name: "shared_libs", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: ":base"}}}},
+		}},
+	}
+
+	edge := r.NinjaEdge(m)
+	if !strings.Contains(edge, "build libapp.so: cpp_shared app_app.o libbase.so") {
+		t.Fatalf("Expected shared library input dependency in edge, got: %s", edge)
+	}
+	if !strings.Contains(edge, "-lbase") {
+		t.Fatalf("Expected linker flag for shared dep, got: %s", edge)
+	}
+}
