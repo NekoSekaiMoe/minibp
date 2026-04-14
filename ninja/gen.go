@@ -168,6 +168,19 @@ func (g *Generator) collectIncludePaths(moduleName string, visited map[string]bo
 		}
 	}
 
+	// Collect from shared_libs (shared library dependencies exporting headers)
+	sharedLibs := GetListProp(m, "shared_libs")
+	for _, dep := range sharedLibs {
+		depName := strings.TrimPrefix(dep, ":")
+		depIncludes := g.collectIncludePaths(depName, visited)
+		for _, dir := range depIncludes {
+			if !seen[dir] {
+				includes = append(includes, dir)
+				seen[dir] = true
+			}
+		}
+	}
+
 	// Recursively collect from deps (option B: transitive)
 	deps := GetListProp(m, "deps")
 	for _, dep := range deps {

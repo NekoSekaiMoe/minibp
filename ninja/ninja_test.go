@@ -466,3 +466,67 @@ func TestCppSharedLibraryIncludesSharedDeps(t *testing.T) {
 		t.Fatalf("Expected linker flag for shared dep, got: %s", edge)
 	}
 }
+
+func TestGeneratorAddsIncludesFromSharedLibs(t *testing.T) {
+	g := dag.NewGraph()
+
+	base := &parser.Module{
+		Type: "cc_library_shared",
+		Map: &parser.Map{Properties: []*parser.Property{
+			{Name: "name", Value: &parser.String{Value: "base"}},
+			{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+				&parser.String{Value: "base.c"},
+			}}},
+			{Name: "export_include_dirs", Value: &parser.List{Values: []parser.Expression{
+				&parser.String{Value: "include/base"},
+			}}},
+			{Name: "exported_headers", Value: &parser.List{Values: []parser.Expression{
+				&parser.String{Value: "generated/base/api.h"},
+			}}},
+		}},
+	}
+
+	app := &parser.Module{
+		Type: "cc_binary",
+		Map: &parser.Map{Properties: []*parser.Property{
+			{Name: "name", Value: &parser.String{Value: "app"}},
+			{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+				&parser.String{Value: "app.c"},
+			}}},
+			{Name: "shared_libs", Value: &parser.List{Values: []parser.Expression{
+				&parser.String{Value: ":base"},
+			}}},
+		}},
+	}
+
+	rules := map[string]BuildRule{
+		"cc_library_shared": &ccLibraryShared{},
+		"cc_binary":         &ccBinary{},
+	}
+	modules := map[string]*parser.Module{
+		"base": base,
+		"app":  app,
+	}
+
+	g.AddModule(&dagMockModule{name: "base"})
+	g.AddModule(&dagMockModule{name: "app"})
+	g.AddEdge("app", "base")
+
+	gen := NewGenerator(g, rules, modules)
+
+	var buf bytes.Buffer
+	if err := gen.Generate(&buf); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "build app_app.o: cc_compile app.c") {
+		t.Fatalf("Expected app compile edge in output, got: %s", output)
+	}
+	if !strings.Contains(output, "-Iinclude/base") {
+		t.Fatalf("Expected shared lib export include dir in output, got: %s", output)
+	}
+	if !strings.Contains(output, "-Igenerated/base") {
+		t.Fatalf("Expected shared lib exported header dir in output, got: %s", output)
+	}
+}
