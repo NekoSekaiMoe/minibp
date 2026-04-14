@@ -215,37 +215,7 @@ func (g *Generator) Generate(w io.Writer) error {
 		nw.Comment("")
 	}
 
-	// Set toolchain env vars before generating rules.
-	tc := g.toolchain
-	if tc.CC == "" {
-		tc.CC = "gcc"
-	}
-	if tc.CXX == "" {
-		tc.CXX = "g++"
-	}
-	if tc.AR == "" {
-		tc.AR = "ar"
-	}
-	archCFlags, archLdFlags := archFlags(g.arch)
-	tc.CFlags = append(append([]string{}, tc.CFlags...), archCFlags...)
-	tc.LdFlags = append(append([]string{}, tc.LdFlags...), archLdFlags...)
-
-	env := map[string]string{
-		"MINIBP_CC":      tc.CC,
-		"MINIBP_CXX":     tc.CXX,
-		"MINIBP_AR":      tc.AR,
-		"MINIBP_CFLAGS":  strings.Join(tc.CFlags, " "),
-		"MINIBP_LDFLAGS": strings.Join(tc.LdFlags, " "),
-	}
-	archSuffix := ""
-	if g.arch != "" {
-		env["MINIBP_ARCH"] = g.arch
-		archSuffix = "_" + g.arch
-	}
-	env["MINIBP_ARCH_SUFFIX"] = archSuffix
-	env["MINIBP_SOURCE_PREFIX"] = g.getRelativePath("")
-	restoreEnv := applyEnv(env)
-	defer restoreEnv()
+	ctx := g.ruleRenderContext()
 
 	usedModuleTypes := g.collectUsedModuleTypes()
 
@@ -253,7 +223,7 @@ func (g *Generator) Generate(w io.Writer) error {
 
 	for _, moduleType := range usedModuleTypes {
 		if rule, ok := g.rules[moduleType]; ok {
-			ruleDef := rule.NinjaRule()
+			ruleDef := rule.NinjaRule(ctx)
 			if ruleDef == "" {
 				continue
 			}
@@ -322,7 +292,7 @@ func (g *Generator) Generate(w io.Writer) error {
 				sourceDir = filepath.Base(absPath)
 			}
 
-			edgeDef := rule.NinjaEdge(m)
+			edgeDef := rule.NinjaEdge(m, ctx)
 			if m.Type == "custom" {
 				edgeDef = customRuleEdge(m, g.workDir)
 			}
@@ -378,14 +348,14 @@ func (g *Generator) Generate(w io.Writer) error {
 			if !ok {
 				continue
 			}
-			edgeDef := rule.NinjaEdge(m)
+			edgeDef := rule.NinjaEdge(m, ctx)
 			if edgeDef == "" && m.Type != "cc_library_headers" {
 				continue
 			}
 			if edgeDef == "" {
 				continue
 			}
-			outputs := rule.Outputs(m)
+			outputs := rule.Outputs(m, ctx)
 			if len(outputs) == 0 {
 				continue
 			}
@@ -399,34 +369,15 @@ func (g *Generator) Generate(w io.Writer) error {
 			if skip {
 				continue
 			}
-			fmt.Fprintf(w, "build %s: phony %s\n", moduleName, strings.Join(outputs, " "))
+			escapedOutputs := make([]string, 0, len(outputs))
+			for _, out := range outputs {
+				escapedOutputs = append(escapedOutputs, g.adjustBuildPath(out, true))
+			}
+			fmt.Fprintf(w, "build %s: phony %s\n", ninjaEscapePath(moduleName), strings.Join(escapedOutputs, " "))
 		}
 	}
 
 	return nil
-}
-
-func applyEnv(vars map[string]string) func() {
-	prev := make(map[string]*string, len(vars))
-	for key, value := range vars {
-		if old, ok := os.LookupEnv(key); ok {
-			oldCopy := old
-			prev[key] = &oldCopy
-		} else {
-			prev[key] = nil
-		}
-		_ = os.Setenv(key, value)
-	}
-
-	return func() {
-		for key, old := range prev {
-			if old == nil {
-				_ = os.Unsetenv(key)
-				continue
-			}
-			_ = os.Setenv(key, *old)
-		}
-	}
 }
 
 func archFlags(arch string) (cflags []string, ldflags []string) {
@@ -442,6 +393,33 @@ func archFlags(arch string) (cflags []string, ldflags []string) {
 	default:
 		return nil, nil
 	}
+}
+
+func (g *Generator) ruleRenderContext() RuleRenderContext {
+	tc := g.toolchain
+	if tc.CC == "" {
+		tc.CC = "gcc"
+	}
+	if tc.CXX == "" {
+		tc.CXX = "g++"
+	}
+	if tc.AR == "" {
+		tc.AR = "ar"
+	}
+	archCFlags, archLdFlags := archFlags(g.arch)
+	tc.CFlags = append(append([]string{}, tc.CFlags...), archCFlags...)
+	tc.LdFlags = append(append([]string{}, tc.LdFlags...), archLdFlags...)
+
+	ctx := DefaultRuleRenderContext()
+	ctx.CC = tc.CC
+	ctx.CXX = tc.CXX
+	ctx.AR = tc.AR
+	ctx.CFlags = strings.Join(tc.CFlags, " ")
+	ctx.LdFlags = strings.Join(tc.LdFlags, " ")
+	if g.arch != "" {
+		ctx.ArchSuffix = "_" + g.arch
+	}
+	return ctx
 }
 
 func shellQuote(arg string) string {
@@ -471,16 +449,16 @@ func collectBuildOutputs(edge string) []string {
 			continue
 		}
 
-		rest := strings.TrimPrefix(line, "build ")
-		parts := strings.SplitN(rest, ":", 2)
-		if len(parts) != 2 {
+		parsed, ok := parseBuildLine(line)
+		if !ok {
 			continue
 		}
 
-		for _, out := range strings.Fields(parts[0]) {
-			if !seen[out] {
-				seen[out] = true
-				outputs = append(outputs, out)
+		for _, out := range parsed.Outputs {
+			rawOut := ninjaUnescape(out)
+			if !seen[rawOut] {
+				seen[rawOut] = true
+				outputs = append(outputs, rawOut)
 			}
 		}
 	}
@@ -488,7 +466,100 @@ func collectBuildOutputs(edge string) []string {
 	return outputs
 }
 
-// addIncludesToEdge adds include directories to compile commands
+type parsedBuildLine struct {
+	Outputs []string
+	Rule    string
+	Inputs  []string
+	Deps    []string
+}
+
+func ninjaUnescape(s string) string {
+	if s == "" {
+		return s
+	}
+
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '$' && i+1 < len(s) {
+			i++
+			b.WriteByte(s[i])
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+func splitNinjaEscapedFields(s string) []string {
+	if s == "" {
+		return nil
+	}
+
+	var fields []string
+	var cur strings.Builder
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if escaped {
+			cur.WriteByte(ch)
+			escaped = false
+			continue
+		}
+		if ch == '$' {
+			escaped = true
+			cur.WriteByte(ch)
+			continue
+		}
+		if ch == ' ' || ch == '\t' {
+			if cur.Len() > 0 {
+				fields = append(fields, cur.String())
+				cur.Reset()
+			}
+			continue
+		}
+		cur.WriteByte(ch)
+	}
+	if escaped {
+		cur.WriteByte('$')
+	}
+	if cur.Len() > 0 {
+		fields = append(fields, cur.String())
+	}
+	return fields
+}
+
+func parseBuildLine(line string) (parsedBuildLine, bool) {
+	if !strings.HasPrefix(line, "build ") {
+		return parsedBuildLine{}, false
+	}
+
+	body := strings.TrimPrefix(line, "build ")
+	separator := strings.Index(body, ": ")
+	if separator == -1 {
+		return parsedBuildLine{}, false
+	}
+
+	outputs := splitNinjaEscapedFields(strings.TrimSpace(body[:separator]))
+	rest := strings.TrimSpace(body[separator+1:])
+	parts := splitNinjaEscapedFields(rest)
+	if len(outputs) == 0 || len(parts) == 0 {
+		return parsedBuildLine{}, false
+	}
+
+	parsed := parsedBuildLine{Outputs: outputs, Rule: parts[0]}
+	current := &parsed.Inputs
+	for _, part := range parts[1:] {
+		if part == "|" {
+			current = &parsed.Deps
+			continue
+		}
+		*current = append(*current, part)
+	}
+	return parsed, true
+}
+
+// addIncludesToEdge adds include directories only to compile commands.
 func (g *Generator) addIncludesToEdge(edge string, includes []string) string {
 	if len(includes) == 0 {
 		return edge
@@ -505,9 +576,14 @@ func (g *Generator) addIncludesToEdge(edge string, includes []string) string {
 
 	// Add to flags variable in edge
 	lines := strings.Split(edge, "\n")
+	compileFlags := false
 	for i, line := range lines {
-		if strings.Contains(line, "flags =") && !strings.Contains(line, "#") {
-			// Append includes to existing flags
+		if strings.HasPrefix(line, "build ") {
+			compileFlags = strings.Contains(line, ": cc_compile ") || strings.Contains(line, ": cpp_compile ")
+			continue
+		}
+		if compileFlags && strings.Contains(line, "flags =") && !strings.Contains(line, "#") {
+			// Append includes to compile flags without affecting link/archive steps.
 			lines[i] = line + includeFlags
 		}
 	}
@@ -515,7 +591,7 @@ func (g *Generator) addIncludesToEdge(edge string, includes []string) string {
 	return strings.Join(lines, "\n")
 }
 
-func (g *Generator) javaDepOutputs(moduleName string) []string {
+func (g *Generator) javaDepOutputs(moduleName string, ctx RuleRenderContext) []string {
 	m, ok := g.modules[moduleName]
 	if !ok || m == nil {
 		return nil
@@ -538,7 +614,7 @@ func (g *Generator) javaDepOutputs(moduleName string) []string {
 		if !ok {
 			continue
 		}
-		for _, out := range rule.Outputs(depMod) {
+		for _, out := range rule.Outputs(depMod, ctx) {
 			if strings.HasSuffix(out, ".jar") && !seen[out] {
 				seen[out] = true
 				outputs = append(outputs, out)
@@ -550,7 +626,7 @@ func (g *Generator) javaDepOutputs(moduleName string) []string {
 }
 
 func (g *Generator) addJavaDepsToEdge(m *parser.Module, edge string) string {
-	depJars := g.javaDepOutputs(getName(m))
+	depJars := g.javaDepOutputs(getName(m), g.ruleRenderContext())
 	if len(depJars) == 0 {
 		return edge
 	}
@@ -589,8 +665,6 @@ func (g *Generator) shouldPrefixInputPath(path string) bool {
 		!strings.HasPrefix(path, "/") &&
 		!strings.HasPrefix(path, "..") &&
 		!strings.HasSuffix(path, ".o") &&
-		!strings.HasSuffix(path, ".a") &&
-		!strings.HasSuffix(path, ".so") &&
 		!strings.HasSuffix(path, ".jar") &&
 		!strings.HasSuffix(path, ".stamp")
 }
@@ -603,9 +677,21 @@ func (g *Generator) shouldPrefixOutputPath(path string) bool {
 		strings.Contains(path, "/")
 }
 
+func (g *Generator) adjustBuildPath(path string, isOutput bool) string {
+	rawPath := ninjaUnescape(path)
+	if isOutput {
+		if g.shouldPrefixOutputPath(rawPath) {
+			rawPath = g.pathPrefix + rawPath
+		}
+	} else if g.shouldPrefixInputPath(rawPath) {
+		rawPath = g.pathPrefix + rawPath
+	}
+	return ninjaEscapePath(rawPath)
+}
+
 func (g *Generator) adjustPaths(edge string) string {
 	if g.pathPrefix == "" {
-		return edge
+		return escapeBuildLines(edge)
 	}
 
 	lines := strings.Split(edge, "\n")
@@ -617,42 +703,71 @@ func (g *Generator) adjustPaths(edge string) string {
 			continue
 		}
 
-		re := strings.SplitN(line, ": ", 2)
-		if len(re) < 2 {
+		parsed, ok := parseBuildLine(line)
+		if !ok {
 			adjustedLines = append(adjustedLines, line)
 			continue
 		}
 
-		outputs := strings.Fields(strings.TrimPrefix(re[0], "build "))
-		for i, output := range outputs {
-			if g.shouldPrefixOutputPath(output) {
-				outputs[i] = g.pathPrefix + output
-			}
+		outputs := make([]string, 0, len(parsed.Outputs))
+		for _, output := range parsed.Outputs {
+			outputs = append(outputs, g.adjustBuildPath(output, true))
 		}
 
-		colonPart := "build " + strings.Join(outputs, " ") + ": "
-		ruleAndInputs := re[1]
-
-		fields := strings.Fields(ruleAndInputs)
-		if len(fields) < 2 {
-			adjustedLines = append(adjustedLines, line)
-			continue
+		inputs := make([]string, 0, len(parsed.Inputs))
+		for _, input := range parsed.Inputs {
+			inputs = append(inputs, g.adjustBuildPath(input, false))
 		}
 
-		inputs := fields[1:]
-		for i, input := range inputs {
-			if input == "|" {
-				continue
-			}
-			if g.shouldPrefixInputPath(input) {
-				inputs[i] = g.pathPrefix + input
-			}
+		deps := make([]string, 0, len(parsed.Deps))
+		for _, dep := range parsed.Deps {
+			deps = append(deps, g.adjustBuildPath(dep, false))
 		}
 
-		adjustedLines = append(adjustedLines, colonPart+fields[0]+" "+strings.Join(inputs, " "))
+		buildLine := "build " + strings.Join(outputs, " ") + ": " + ninjaEscapePath(parsed.Rule)
+		if len(inputs) > 0 {
+			buildLine += " " + strings.Join(inputs, " ")
+		}
+		if len(deps) > 0 {
+			buildLine += " | " + strings.Join(deps, " ")
+		}
+		adjustedLines = append(adjustedLines, buildLine)
 	}
 
 	return strings.Join(adjustedLines, "\n")
+}
+
+func escapeBuildLines(edge string) string {
+	lines := strings.Split(edge, "\n")
+	for i, line := range lines {
+		parsed, ok := parseBuildLine(line)
+		if !ok {
+			continue
+		}
+
+		outputs := make([]string, 0, len(parsed.Outputs))
+		for _, output := range parsed.Outputs {
+			outputs = append(outputs, ninjaEscapePath(ninjaUnescape(output)))
+		}
+		inputs := make([]string, 0, len(parsed.Inputs))
+		for _, input := range parsed.Inputs {
+			inputs = append(inputs, ninjaEscapePath(ninjaUnescape(input)))
+		}
+		deps := make([]string, 0, len(parsed.Deps))
+		for _, dep := range parsed.Deps {
+			deps = append(deps, ninjaEscapePath(ninjaUnescape(dep)))
+		}
+
+		buildLine := "build " + strings.Join(outputs, " ") + ": " + ninjaEscapePath(parsed.Rule)
+		if len(inputs) > 0 {
+			buildLine += " " + strings.Join(inputs, " ")
+		}
+		if len(deps) > 0 {
+			buildLine += " | " + strings.Join(deps, " ")
+		}
+		lines[i] = buildLine
+	}
+	return strings.Join(lines, "\n")
 }
 
 // collectUsedModuleTypes returns a deduplicated list of module types used
@@ -676,7 +791,7 @@ func (g *Generator) collectUsedModuleTypes() []string {
 // collectRulesForModule returns all ninja rule names used by a build rule
 func (g *Generator) collectRulesForModule(rule BuildRule) []string {
 	// Extract rule names from NinjaRule() output
-	ruleDef := rule.NinjaRule()
+	ruleDef := rule.NinjaRule(g.ruleRenderContext())
 	var rules []string
 	seen := make(map[string]bool)
 

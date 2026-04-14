@@ -32,18 +32,18 @@ func (r *mockRule) Name() string {
 	return r.name
 }
 
-func (r *mockRule) NinjaRule() string {
+func (r *mockRule) NinjaRule(ctx RuleRenderContext) string {
 	return "rule " + r.name + "\n  command = echo " + r.name + "\n"
 }
 
-func (r *mockRule) NinjaEdge(m *parser.Module) string {
+func (r *mockRule) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	if m == nil {
 		return ""
 	}
 	return "build " + getName(m) + ": " + r.name + " " + formatSrcs(getSrcs(m)) + "\n"
 }
 
-func (r *mockRule) Outputs(m *parser.Module) []string {
+func (r *mockRule) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	return []string{getName(m)}
 }
 
@@ -147,7 +147,7 @@ func TestCollectBuildOutputs(t *testing.T) {
 
 func TestJavaImportRuleUsesPlatformCopyCommand(t *testing.T) {
 	r := &javaImport{}
-	rule := r.NinjaRule()
+	rule := r.NinjaRule(DefaultRuleRenderContext())
 	if runtime.GOOS == "windows" {
 		if !strings.Contains(rule, "cmd /c copy") {
 			t.Fatalf("Expected windows copy command, got: %s", rule)
@@ -365,8 +365,11 @@ func TestGeneratorAppliesToolchainAndArchFlags(t *testing.T) {
 	if !strings.Contains(output, "flags = --sysroot=/opt/sdk -DTOOLCHAIN -m64 -DMODULE -I.\n") {
 		t.Fatalf("Expected merged compile flags in edge, got: %s", output)
 	}
-	if !strings.Contains(output, "flags = -fuse-ld=lld -m64 -pthread -I.\n") {
+	if !strings.Contains(output, "flags = -fuse-ld=lld -m64 -pthread\n") {
 		t.Fatalf("Expected merged link flags in edge, got: %s", output)
+	}
+	if strings.Contains(output, "build app_x86_64: cc_link app_main.o\n flags = -fuse-ld=lld -m64 -pthread -I.") {
+		t.Fatalf("Expected compile include paths to be excluded from link edge, got: %s", output)
 	}
 	if !strings.Contains(output, "build app_x86_64: cc_link app_main.o") {
 		t.Fatalf("Expected arch-suffixed binary output, got: %s", output)
@@ -375,10 +378,70 @@ func TestGeneratorAppliesToolchainAndArchFlags(t *testing.T) {
 		t.Fatalf("Expected object compile edge, got: %s", output)
 	}
 	if got := os.Getenv("MINIBP_CFLAGS"); got != "" {
-		t.Fatalf("Expected MINIBP_CFLAGS restored after generation, got %q", got)
+		t.Fatalf("Expected generation to avoid MINIBP_CFLAGS mutation, got %q", got)
 	}
 	if got := os.Getenv("MINIBP_LDFLAGS"); got != "" {
-		t.Fatalf("Expected MINIBP_LDFLAGS restored after generation, got %q", got)
+		t.Fatalf("Expected generation to avoid MINIBP_LDFLAGS mutation, got %q", got)
+	}
+}
+
+func TestGeneratorEnvIsolationAcrossInstances(t *testing.T) {
+	newGenerator := func(cc, arch string) *Generator {
+		g := dag.NewGraph()
+		m := &parser.Module{Type: "cc_binary", Map: &parser.Map{Properties: []*parser.Property{
+			{Name: "name", Value: &parser.String{Value: "app"}},
+			{Name: "srcs", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: "main.c"}}}},
+		}}}
+		rules := map[string]BuildRule{"cc_binary": &ccBinary{}}
+		modules := map[string]*parser.Module{"app": m}
+		g.AddModule(&dagMockModule{name: "app"})
+
+		gen := NewGenerator(g, rules, modules)
+		gen.SetToolchain(Toolchain{CC: cc})
+		gen.SetArch(arch)
+		return gen
+	}
+
+	var first bytes.Buffer
+	if err := newGenerator("clang", "x86_64").Generate(&first); err != nil {
+		t.Fatalf("first Generate failed: %v", err)
+	}
+	firstOut := first.String()
+	if !strings.Contains(firstOut, "command = clang -c $in -o $out $flags -MMD -MF $out.d") {
+		t.Fatalf("Expected first generator to use clang, got: %s", firstOut)
+	}
+	if !strings.Contains(firstOut, "build app_x86_64: cc_link app_main.o") {
+		t.Fatalf("Expected first generator to use x86_64 suffix, got: %s", firstOut)
+	}
+
+	var second bytes.Buffer
+	if err := newGenerator("zig cc", "arm64").Generate(&second); err != nil {
+		t.Fatalf("second Generate failed: %v", err)
+	}
+	secondOut := second.String()
+	if !strings.Contains(secondOut, "command = zig cc -c $in -o $out $flags -MMD -MF $out.d") {
+		t.Fatalf("Expected second generator to use zig cc, got: %s", secondOut)
+	}
+	if !strings.Contains(secondOut, "build app_arm64: cc_link app_main.o") {
+		t.Fatalf("Expected second generator to use arm64 suffix, got: %s", secondOut)
+	}
+	if strings.Contains(secondOut, "clang") || strings.Contains(secondOut, "app_x86_64") {
+		t.Fatalf("Expected second generator output to avoid first generator state, got: %s", secondOut)
+	}
+
+	var third bytes.Buffer
+	if err := newGenerator("", "").Generate(&third); err != nil {
+		t.Fatalf("third Generate failed: %v", err)
+	}
+	thirdOut := third.String()
+	if !strings.Contains(thirdOut, "command = gcc -c $in -o $out $flags -MMD -MF $out.d") {
+		t.Fatalf("Expected default compiler after isolated renders, got: %s", thirdOut)
+	}
+	if strings.Contains(thirdOut, "app_x86_64") || strings.Contains(thirdOut, "app_arm64") {
+		t.Fatalf("Expected default generator output to avoid prior arch state, got: %s", thirdOut)
+	}
+	if got := os.Getenv("MINIBP_CC"); got != "" {
+		t.Fatalf("Expected generation to avoid MINIBP_CC mutation, got %q", got)
 	}
 }
 
@@ -512,12 +575,12 @@ func TestProtoLibraryRule(t *testing.T) {
 		},
 	}
 
-	outs := r.Outputs(m)
+	outs := r.Outputs(m, DefaultRuleRenderContext())
 	if len(outs) != 2 || outs[0] != "api.pb.h" || outs[1] != "api.pb.cc" {
 		t.Errorf("Expected [api.pb.h, api.pb.cc], got %v", outs)
 	}
 
-	edge := r.NinjaEdge(m)
+	edge := r.NinjaEdge(m, DefaultRuleRenderContext())
 	if !strings.Contains(edge, "protoc") {
 		t.Errorf("Expected protoc in edge, got: %s", edge)
 	}
@@ -544,7 +607,7 @@ func TestProtoLibraryGoOutput(t *testing.T) {
 		},
 	}
 
-	outs := r.Outputs(m)
+	outs := r.Outputs(m, DefaultRuleRenderContext())
 	if len(outs) != 1 || outs[0] != "api.pb.go" {
 		t.Errorf("Expected [api.pb.go], got %v", outs)
 	}
@@ -565,7 +628,7 @@ func TestProtoLibraryJavaOutput(t *testing.T) {
 		},
 	}
 
-	outs := r.Outputs(m)
+	outs := r.Outputs(m, DefaultRuleRenderContext())
 	if len(outs) != 1 || outs[0] != "api.java" {
 		t.Errorf("Expected [api.java], got %v", outs)
 	}
@@ -591,7 +654,7 @@ func TestProtoLibraryWithPlugins(t *testing.T) {
 		},
 	}
 
-	edge := r.NinjaEdge(m)
+	edge := r.NinjaEdge(m, DefaultRuleRenderContext())
 	if !strings.Contains(edge, "--plugin=protoc-gen-go") {
 		t.Errorf("Expected plugin flag in edge, got: %s", edge)
 	}
@@ -602,7 +665,7 @@ func TestProtoLibraryWithPlugins(t *testing.T) {
 
 func TestDepfileInCppRules(t *testing.T) {
 	r := &cppLibrary{}
-	rule := r.NinjaRule()
+	rule := r.NinjaRule(DefaultRuleRenderContext())
 	if !strings.Contains(rule, "depfile = $out.d") {
 		t.Errorf("Expected depfile in cpp_compile rule, got: %s", rule)
 	}
@@ -611,7 +674,7 @@ func TestDepfileInCppRules(t *testing.T) {
 	}
 
 	r2 := &cppBinary{}
-	rule2 := r2.NinjaRule()
+	rule2 := r2.NinjaRule(DefaultRuleRenderContext())
 	if !strings.Contains(rule2, "depfile = $out.d") {
 		t.Errorf("Expected depfile in cpp_binary compile rule, got: %s", rule2)
 	}
@@ -629,7 +692,7 @@ func TestCCSharedLibraryIncludesSharedDeps(t *testing.T) {
 		}},
 	}
 
-	edge := r.NinjaEdge(m)
+	edge := r.NinjaEdge(m, DefaultRuleRenderContext())
 	if !strings.Contains(edge, "build libapp.so: cc_shared app_app.o libbase.so") {
 		t.Fatalf("Expected shared library input dependency in edge, got: %s", edge)
 	}
@@ -650,7 +713,7 @@ func TestCppSharedLibraryIncludesSharedDeps(t *testing.T) {
 		}},
 	}
 
-	edge := r.NinjaEdge(m)
+	edge := r.NinjaEdge(m, DefaultRuleRenderContext())
 	if !strings.Contains(edge, "build libapp.so: cpp_shared app_app.o libbase.so") {
 		t.Fatalf("Expected shared library input dependency in edge, got: %s", edge)
 	}
@@ -672,7 +735,7 @@ func TestCCLibraryObjectOutputsAreUniqueForDuplicateBasenames(t *testing.T) {
 		}},
 	}
 
-	edge := r.NinjaEdge(m)
+	edge := r.NinjaEdge(m, DefaultRuleRenderContext())
 	if !strings.Contains(edge, "build dupes_src_foo_util.o: cc_compile src/foo/util.c") {
 		t.Fatalf("Expected unique object output for first source, got: %s", edge)
 	}
@@ -697,12 +760,12 @@ func TestCCObjectMultiSourceProducesOneOutputPerSource(t *testing.T) {
 		}},
 	}
 
-	outputs := r.Outputs(m)
+	outputs := r.Outputs(m, DefaultRuleRenderContext())
 	if len(outputs) != 2 || outputs[0] != "bundle_src_foo.o" || outputs[1] != "bundle_src_bar.o" {
 		t.Fatalf("Expected one object output per source, got: %v", outputs)
 	}
 
-	edge := r.NinjaEdge(m)
+	edge := r.NinjaEdge(m, DefaultRuleRenderContext())
 	if !strings.Contains(edge, "build bundle_src_foo.o: cc_compile src/foo.c") {
 		t.Fatalf("Expected compile edge for first source, got: %s", edge)
 	}
@@ -776,6 +839,10 @@ func TestGeneratorAddsIncludesFromSharedLibs(t *testing.T) {
 	if !strings.Contains(output, "-Igenerated/base") {
 		t.Fatalf("Expected shared lib exported header dir in output, got: %s", output)
 	}
+	if strings.Contains(output, "build app: cc_link app_app.o libbase.so\n flags = -lbase -Iinclude/base") ||
+		strings.Contains(output, "build app: cc_link app_app.o libbase.so\n flags = -lbase -Igenerated/base") {
+		t.Fatalf("Expected shared library include paths to stay on compile edge, got: %s", output)
+	}
 }
 
 func TestCCBinarySeparatesCompileAndLinkFlags(t *testing.T) {
@@ -791,7 +858,7 @@ func TestCCBinarySeparatesCompileAndLinkFlags(t *testing.T) {
 		}},
 	}
 
-	edge := r.NinjaEdge(m)
+	edge := r.NinjaEdge(m, DefaultRuleRenderContext())
 	if !strings.Contains(edge, "build app_app.o: cc_compile app.c\n flags = -O2\n") {
 		t.Fatalf("Expected compile edge to use only cflags, got: %s", edge)
 	}
@@ -939,7 +1006,7 @@ func TestJavaLibraryEdgeIncludesDependencyClasspathAndJarInput(t *testing.T) {
 	modules := map[string]*parser.Module{"app": m, "libjava": dep}
 	gen := NewGenerator(g, rules, modules)
 
-	edge := gen.addJavaDepsToEdge(m, r.NinjaEdge(m))
+	edge := gen.addJavaDepsToEdge(m, r.NinjaEdge(m, DefaultRuleRenderContext()))
 	classpath := "libjava.jar"
 	if os.PathListSeparator != ':' {
 		classpath = strings.ReplaceAll(classpath, ":", string(os.PathListSeparator))
@@ -1047,6 +1114,99 @@ func TestGeneratorRewritesExplicitRelativeOutputsForExternalNinja(t *testing.T) 
 	}
 	if !strings.Contains(output, "cmd = cp assets/config.json out/config.json") {
 		t.Fatalf("Expected custom command payload to remain source-relative, got: %s", output)
+	}
+}
+
+func TestGeneratorEscapesRewrittenPathsWithSpacesAndSpecialCharacters(t *testing.T) {
+	g := dag.NewGraph()
+
+	m := &parser.Module{Type: "custom", Map: &parser.Map{Properties: []*parser.Property{
+		{Name: "name", Value: &parser.String{Value: "copy_assets"}},
+		{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+			&parser.String{Value: "assets dir/input$file:name.txt"},
+		}}},
+		{Name: "outs", Value: &parser.List{Values: []parser.Expression{
+			&parser.String{Value: "out dir/file:name$.txt"},
+		}}},
+		{Name: "cmd", Value: &parser.String{Value: "cp $in $out"}},
+	}}}
+
+	rules := map[string]BuildRule{"custom": &customRule{}}
+	modules := map[string]*parser.Module{"copy_assets": m}
+
+	g.AddModule(&dagMockModule{name: "copy_assets"})
+
+	gen := NewGenerator(g, rules, modules)
+	gen.SetPathPrefix("examples/")
+
+	var buf bytes.Buffer
+	if err := gen.Generate(&buf); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "build examples/out$ dir/file$:name$$.txt: custom_command examples/assets$ dir/input$$file$:name.txt") {
+		t.Fatalf("Expected rewritten build edge to preserve and escape paths, got: %s", output)
+	}
+	if !strings.Contains(output, "cmd = cp assets dir/input$file:name.txt out dir/file:name$.txt") {
+		t.Fatalf("Expected custom command payload to remain unescaped and source-relative, got: %s", output)
+	}
+	if strings.Contains(output, "build examples/out dir/file:name$.txt: custom_command examples/assets dir/input$file:name.txt") {
+		t.Fatalf("Expected build edge paths to be ninja-escaped, got: %s", output)
+	}
+}
+
+func TestGeneratorPreservesNativeLinkInputsForExternalNinja(t *testing.T) {
+	g := dag.NewGraph()
+
+	base := &parser.Module{Type: "cc_library_shared", Map: &parser.Map{Properties: []*parser.Property{
+		{Name: "name", Value: &parser.String{Value: "base"}},
+		{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+			&parser.String{Value: "base.c"},
+		}}},
+	}}}
+	app := &parser.Module{Type: "cc_binary", Map: &parser.Map{Properties: []*parser.Property{
+		{Name: "name", Value: &parser.String{Value: "app"}},
+		{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+			&parser.String{Value: "app.c"},
+		}}},
+		{Name: "shared_libs", Value: &parser.List{Values: []parser.Expression{
+			&parser.String{Value: ":base"},
+		}}},
+	}}}
+
+	rules := map[string]BuildRule{
+		"cc_library_shared": &ccLibraryShared{},
+		"cc_binary":         &ccBinary{},
+	}
+	modules := map[string]*parser.Module{
+		"base": base,
+		"app":  app,
+	}
+
+	g.AddModule(&dagMockModule{name: "base"})
+	g.AddModule(&dagMockModule{name: "app"})
+	g.AddEdge("app", "base")
+
+	gen := NewGenerator(g, rules, modules)
+	gen.SetSourceDir("examples")
+	gen.SetOutputDir("out")
+	gen.SetPathPrefix("../examples/")
+
+	var buf bytes.Buffer
+	if err := gen.Generate(&buf); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "build app: cc_link app_app.o ../examples/libbase.so") {
+		t.Fatalf("Expected shared library link input to be rewritten for external ninja, got: %s", output)
+	}
+	if strings.Contains(output, "build app: cc_link app_app.o libbase.so") {
+		t.Fatalf("Expected external ninja to avoid source-tree-relative shared library inputs, got: %s", output)
+	}
+	if !strings.Contains(output, "build libbase.so: cc_shared base_base.o") {
+		t.Fatalf("Expected generated shared library output to remain local build output, got: %s", output)
 	}
 }
 

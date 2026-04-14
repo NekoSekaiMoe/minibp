@@ -14,10 +14,39 @@ import (
 // BuildRule is the interface for all ninja rule implementations
 type BuildRule interface {
 	Name() string
-	NinjaRule() string
-	NinjaEdge(m *parser.Module) string
-	Outputs(m *parser.Module) []string
+	NinjaRule(ctx RuleRenderContext) string
+	NinjaEdge(m *parser.Module, ctx RuleRenderContext) string
+	Outputs(m *parser.Module, ctx RuleRenderContext) []string
 	Desc(m *parser.Module, srcFile string) string
+}
+
+type RuleRenderContext struct {
+	CC         string
+	CXX        string
+	AR         string
+	ArchSuffix string
+	CFlags     string
+	LdFlags    string
+}
+
+func DefaultRuleRenderContext() RuleRenderContext {
+	return RuleRenderContext{
+		CC:  "gcc",
+		CXX: "g++",
+		AR:  "ar",
+	}
+}
+
+func libOutputName(name, archSuffix, ext string) string {
+	return "lib" + name + archSuffix + ext
+}
+
+func sharedLibOutputName(name string, ctx RuleRenderContext) string {
+	return libOutputName(name, ctx.ArchSuffix, ".so")
+}
+
+func staticLibOutputName(name string, ctx RuleRenderContext) string {
+	return libOutputName(name, ctx.ArchSuffix, ".a")
 }
 
 func GetStringProp(m *parser.Module, name string) string {
@@ -127,39 +156,6 @@ func objectOutputName(moduleName, src string) string {
 	return moduleName + "_" + name + ".o"
 }
 
-func getCC() string {
-	if v := os.Getenv("MINIBP_CC"); v != "" {
-		return v
-	}
-	return "gcc"
-}
-
-func getCXX() string {
-	if v := os.Getenv("MINIBP_CXX"); v != "" {
-		return v
-	}
-	return "g++"
-}
-
-func getAR() string {
-	if v := os.Getenv("MINIBP_AR"); v != "" {
-		return v
-	}
-	return "ar"
-}
-
-func getArchSuffix() string {
-	return os.Getenv("MINIBP_ARCH_SUFFIX")
-}
-
-func getGlobalCflags() string {
-	return os.Getenv("MINIBP_CFLAGS")
-}
-
-func getGlobalLdflags() string {
-	return os.Getenv("MINIBP_LDFLAGS")
-}
-
 func joinFlags(parts ...string) string {
 	filtered := make([]string, 0, len(parts))
 	for _, part := range parts {
@@ -177,7 +173,7 @@ func joinFlags(parts ...string) string {
 type ccLibrary struct{}
 
 func (r *ccLibrary) Name() string { return "cc_library" }
-func (r *ccLibrary) NinjaRule() string {
+func (r *ccLibrary) NinjaRule(ctx RuleRenderContext) string {
 	return fmt.Sprintf(`rule cc_compile
   command = %s -c $in -o $out $flags -MMD -MF $out.d
   depfile = $out.d
@@ -188,13 +184,13 @@ rule cc_archive
 
 rule cc_shared
   command = %s -shared -o $out $in $flags
- `, getCC(), getAR(), getCC())
+ `, ctx.CC, ctx.AR, ctx.CC)
 }
 
 type ccLibraryStatic struct{}
 
 func (r *ccLibraryStatic) Name() string { return "cc_library_static" }
-func (r *ccLibraryStatic) NinjaRule() string {
+func (r *ccLibraryStatic) NinjaRule(ctx RuleRenderContext) string {
 	return fmt.Sprintf(`rule cc_compile
   command = %s -c $in -o $out $flags -MMD -MF $out.d
   depfile = $out.d
@@ -202,13 +198,13 @@ func (r *ccLibraryStatic) NinjaRule() string {
 
 rule cc_archive
   command = %s rcs $out $in
- `, getCC(), getAR())
+ `, ctx.CC, ctx.AR)
 }
 
 type ccLibraryShared struct{}
 
 func (r *ccLibraryShared) Name() string { return "cc_library_shared" }
-func (r *ccLibraryShared) NinjaRule() string {
+func (r *ccLibraryShared) NinjaRule(ctx RuleRenderContext) string {
 	return fmt.Sprintf(`rule cc_compile
   command = %s -c $in -o $out $flags -MMD -MF $out.d
   depfile = $out.d
@@ -216,36 +212,36 @@ func (r *ccLibraryShared) NinjaRule() string {
 
 rule cc_shared
   command = %s -shared -o $out $in $flags
- `, getCC(), getCC())
+ `, ctx.CC, ctx.CC)
 }
 
-func (r *ccLibrary) Outputs(m *parser.Module) []string {
+func (r *ccLibrary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
-	suffix := getArchSuffix()
+	suffix := ctx.ArchSuffix
 	if getBoolProp(m, "shared") {
 		return []string{fmt.Sprintf("lib%s%s.so", name, suffix)}
 	}
 	return []string{fmt.Sprintf("lib%s%s.a", name, suffix)}
 }
 
-func (r *ccLibrary) NinjaEdge(m *parser.Module) string {
+func (r *ccLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
 	shared := getBoolProp(m, "shared")
-	cflags := joinFlags(getGlobalCflags(), getCflags(m))
-	ldflags := joinFlags(getGlobalLdflags(), getLdflags(m))
+	cflags := joinFlags(ctx.CFlags, getCflags(m))
+	ldflags := joinFlags(ctx.LdFlags, getLdflags(m))
 	var sharedInputs []string
 	sharedLibs := GetListProp(m, "shared_libs")
 	if shared && len(sharedLibs) > 0 {
 		for _, dep := range sharedLibs {
 			depName := strings.TrimPrefix(dep, ":")
-			sharedInputs = append(sharedInputs, getSharedLibOutputName(depName))
+			sharedInputs = append(sharedInputs, sharedLibOutputName(depName, ctx))
 			ldflags = joinFlags(ldflags, "-l"+depName)
 		}
 	}
@@ -258,7 +254,7 @@ func (r *ccLibrary) NinjaEdge(m *parser.Module) string {
 		edges.WriteString(fmt.Sprintf("build %s: cc_compile %s\n flags = %s\n", obj, src, cflags))
 	}
 
-	out := r.Outputs(m)[0]
+	out := r.Outputs(m, ctx)[0]
 	if shared {
 		allInputs := append(objFiles, sharedInputs...)
 		edges.WriteString(fmt.Sprintf("build %s: cc_shared %s\n flags = %s\n", out, strings.Join(allInputs, " "), ldflags))
@@ -281,20 +277,20 @@ func (r *ccLibrary) Desc(m *parser.Module, srcFile string) string {
 // ============================================================================
 // cc_library_static
 // ============================================================================
-func (r *ccLibraryStatic) Outputs(m *parser.Module) []string {
+func (r *ccLibraryStatic) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
-	return []string{fmt.Sprintf("lib%s%s.a", name, getArchSuffix())}
+	return []string{fmt.Sprintf("lib%s%s.a", name, ctx.ArchSuffix)}
 }
-func (r *ccLibraryStatic) NinjaEdge(m *parser.Module) string {
+func (r *ccLibraryStatic) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
-	cflags := joinFlags(getGlobalCflags(), getCflags(m))
+	cflags := joinFlags(ctx.CFlags, getCflags(m))
 	var edges strings.Builder
 	var objFiles []string
 	for _, src := range srcs {
@@ -302,7 +298,7 @@ func (r *ccLibraryStatic) NinjaEdge(m *parser.Module) string {
 		objFiles = append(objFiles, obj)
 		edges.WriteString(fmt.Sprintf("build %s: cc_compile %s\n flags = %s\n", obj, src, cflags))
 	}
-	out := r.Outputs(m)[0]
+	out := r.Outputs(m, ctx)[0]
 	edges.WriteString(fmt.Sprintf("build %s: cc_archive %s\n", out, strings.Join(objFiles, " ")))
 	return edges.String()
 }
@@ -316,26 +312,26 @@ func (r *ccLibraryStatic) Desc(m *parser.Module, srcFile string) string {
 // ============================================================================
 // cc_library_shared
 // ============================================================================
-func (r *ccLibraryShared) Outputs(m *parser.Module) []string {
+func (r *ccLibraryShared) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
-	return []string{fmt.Sprintf("lib%s%s.so", name, getArchSuffix())}
+	return []string{fmt.Sprintf("lib%s%s.so", name, ctx.ArchSuffix)}
 }
-func (r *ccLibraryShared) NinjaEdge(m *parser.Module) string {
+func (r *ccLibraryShared) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
-	cflags := joinFlags(getGlobalCflags(), getCflags(m))
-	ldflags := joinFlags(getGlobalLdflags(), getLdflags(m))
+	cflags := joinFlags(ctx.CFlags, getCflags(m))
+	ldflags := joinFlags(ctx.LdFlags, getLdflags(m))
 	var sharedInputs []string
 	sharedLibs := GetListProp(m, "shared_libs")
 	for _, dep := range sharedLibs {
 		depName := strings.TrimPrefix(dep, ":")
-		sharedInputs = append(sharedInputs, getSharedLibOutputName(depName))
+		sharedInputs = append(sharedInputs, sharedLibOutputName(depName, ctx))
 		ldflags = joinFlags(ldflags, "-l"+depName)
 	}
 	var edges strings.Builder
@@ -345,7 +341,7 @@ func (r *ccLibraryShared) NinjaEdge(m *parser.Module) string {
 		objFiles = append(objFiles, obj)
 		edges.WriteString(fmt.Sprintf("build %s: cc_compile %s\n flags = %s\n", obj, src, cflags))
 	}
-	out := r.Outputs(m)[0]
+	out := r.Outputs(m, ctx)[0]
 	allInputs := append(objFiles, sharedInputs...)
 	edges.WriteString(fmt.Sprintf("build %s: cc_shared %s\n flags = %s\n", out, strings.Join(allInputs, " "), ldflags))
 	return edges.String()
@@ -363,21 +359,21 @@ func (r *ccLibraryShared) Desc(m *parser.Module, srcFile string) string {
 type ccObject struct{}
 
 func (r *ccObject) Name() string { return "cc_object" }
-func (r *ccObject) NinjaRule() string {
+func (r *ccObject) NinjaRule(ctx RuleRenderContext) string {
 	return fmt.Sprintf(`rule cc_compile
   command = %s -c $in -o $out $flags -MMD -MF $out.d
   depfile = $out.d
   deps = gcc
- `, getCC())
+ `, ctx.CC)
 }
-func (r *ccObject) Outputs(m *parser.Module) []string {
+func (r *ccObject) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" {
 		return nil
 	}
 	if len(srcs) <= 1 {
-		return []string{fmt.Sprintf("%s%s.o", name, getArchSuffix())}
+		return []string{fmt.Sprintf("%s%s.o", name, ctx.ArchSuffix)}
 	}
 	outputs := make([]string, 0, len(srcs))
 	for _, src := range srcs {
@@ -385,19 +381,19 @@ func (r *ccObject) Outputs(m *parser.Module) []string {
 	}
 	return outputs
 }
-func (r *ccObject) NinjaEdge(m *parser.Module) string {
+func (r *ccObject) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
-	cflags := joinFlags(getGlobalCflags(), getCflags(m))
+	cflags := joinFlags(ctx.CFlags, getCflags(m))
 	if len(srcs) == 1 {
-		out := r.Outputs(m)[0]
+		out := r.Outputs(m, ctx)[0]
 		return fmt.Sprintf("build %s: cc_compile %s\n flags = %s\n", out, srcs[0], cflags)
 	}
 	var edges strings.Builder
-	outputs := r.Outputs(m)
+	outputs := r.Outputs(m, ctx)
 	for i, src := range srcs {
 		edges.WriteString(fmt.Sprintf("build %s: cc_compile %s\n flags = %s\n", outputs[i], src, cflags))
 	}
@@ -411,7 +407,7 @@ func (r *ccObject) Desc(m *parser.Module, srcFile string) string { return "gcc" 
 type ccBinary struct{}
 
 func (r *ccBinary) Name() string { return "cc_binary" }
-func (r *ccBinary) NinjaRule() string {
+func (r *ccBinary) NinjaRule(ctx RuleRenderContext) string {
 	return fmt.Sprintf(`rule cc_compile
   command = %s -c $in -o $out $flags -MMD -MF $out.d
   depfile = $out.d
@@ -419,24 +415,17 @@ func (r *ccBinary) NinjaRule() string {
 
 rule cc_link
   command = %s -o $out $in $flags
- `, getCC(), getCC())
+ `, ctx.CC, ctx.CC)
 }
-func (r *ccBinary) Outputs(m *parser.Module) []string {
+func (r *ccBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
-	return []string{name + getArchSuffix()}
-}
-func getLibOutputName(name string) string {
-	return "lib" + name + getArchSuffix() + ".a"
+	return []string{name + ctx.ArchSuffix}
 }
 
-func getSharedLibOutputName(name string) string {
-	return "lib" + name + getArchSuffix() + ".so"
-}
-
-func (r *ccBinary) NinjaEdge(m *parser.Module) string {
+func (r *ccBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	deps := GetListProp(m, "deps")
@@ -444,17 +433,17 @@ func (r *ccBinary) NinjaEdge(m *parser.Module) string {
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
-	cflags := joinFlags(getGlobalCflags(), getCflags(m))
-	ldflags := joinFlags(getGlobalLdflags(), getLdflags(m))
+	cflags := joinFlags(ctx.CFlags, getCflags(m))
+	ldflags := joinFlags(ctx.LdFlags, getLdflags(m))
 	linkFlags := ldflags
 	var libFiles []string
 	for _, dep := range deps {
 		depName := strings.TrimPrefix(dep, ":")
-		libFiles = append(libFiles, getLibOutputName(depName))
+		libFiles = append(libFiles, staticLibOutputName(depName, ctx))
 	}
 	for _, dep := range sharedLibs {
 		depName := strings.TrimPrefix(dep, ":")
-		libFiles = append(libFiles, getSharedLibOutputName(depName))
+		libFiles = append(libFiles, sharedLibOutputName(depName, ctx))
 		linkFlags = joinFlags(linkFlags, "-l"+depName)
 	}
 	var edges strings.Builder
@@ -464,7 +453,7 @@ func (r *ccBinary) NinjaEdge(m *parser.Module) string {
 		objFiles = append(objFiles, obj)
 		edges.WriteString(fmt.Sprintf("build %s: cc_compile %s\n flags = %s\n", obj, src, cflags))
 	}
-	out := r.Outputs(m)[0]
+	out := r.Outputs(m, ctx)[0]
 	allInputs := append(objFiles, libFiles...)
 	edges.WriteString(fmt.Sprintf("build %s: cc_link %s\n flags = %s\n", out, strings.Join(allInputs, " "), linkFlags))
 	return edges.String()
@@ -482,7 +471,7 @@ func (r *ccBinary) Desc(m *parser.Module, srcFile string) string {
 type cppLibrary struct{}
 
 func (r *cppLibrary) Name() string { return "cpp_library" }
-func (r *cppLibrary) NinjaRule() string {
+func (r *cppLibrary) NinjaRule(ctx RuleRenderContext) string {
 	return fmt.Sprintf(`rule cpp_compile
   command = %s -c $in -o $out $flags -MMD -MF $out.d
   depfile = $out.d
@@ -493,20 +482,20 @@ rule cpp_archive
 
 rule cpp_shared
   command = %s -shared -o $out $in $flags
- `, getCXX(), getAR(), getCXX())
+ `, ctx.CXX, ctx.AR, ctx.CXX)
 }
-func (r *cppLibrary) Outputs(m *parser.Module) []string {
+func (r *cppLibrary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
-	suffix := getArchSuffix()
+	suffix := ctx.ArchSuffix
 	if getBoolProp(m, "shared") {
 		return []string{fmt.Sprintf("lib%s%s.so", name, suffix)}
 	}
 	return []string{fmt.Sprintf("lib%s%s.a", name, suffix)}
 }
-func (r *cppLibrary) NinjaEdge(m *parser.Module) string {
+func (r *cppLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" || len(srcs) == 0 {
@@ -522,7 +511,7 @@ func (r *cppLibrary) NinjaEdge(m *parser.Module) string {
 		sharedLibs := GetListProp(m, "shared_libs")
 		for _, dep := range sharedLibs {
 			depName := strings.TrimPrefix(dep, ":")
-			sharedInputs = append(sharedInputs, getSharedLibOutputName(depName))
+			sharedInputs = append(sharedInputs, sharedLibOutputName(depName, ctx))
 			ldflags = joinFlags(ldflags, "-l"+depName)
 		}
 	}
@@ -533,7 +522,7 @@ func (r *cppLibrary) NinjaEdge(m *parser.Module) string {
 		objFiles = append(objFiles, obj)
 		edges.WriteString(fmt.Sprintf("build %s: cpp_compile %s\n flags = %s\n", obj, src, allFlags))
 	}
-	out := r.Outputs(m)[0]
+	out := r.Outputs(m, ctx)[0]
 	if shared {
 		allInputs := append(objFiles, sharedInputs...)
 		edges.WriteString(fmt.Sprintf("build %s: cpp_shared %s\n flags = %s\n", out, strings.Join(allInputs, " "), ldflags))
@@ -558,7 +547,7 @@ func (r *cppLibrary) Desc(m *parser.Module, srcFile string) string {
 type cppBinary struct{}
 
 func (r *cppBinary) Name() string { return "cpp_binary" }
-func (r *cppBinary) NinjaRule() string {
+func (r *cppBinary) NinjaRule(ctx RuleRenderContext) string {
 	return fmt.Sprintf(`rule cpp_compile
   command = %s -c $in -o $out $flags -MMD -MF $out.d
   depfile = $out.d
@@ -566,16 +555,16 @@ func (r *cppBinary) NinjaRule() string {
 
 rule cpp_link
   command = %s -o $out $in $flags
- `, getCXX(), getCXX())
+ `, ctx.CXX, ctx.CXX)
 }
-func (r *cppBinary) Outputs(m *parser.Module) []string {
+func (r *cppBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
-	return []string{name + getArchSuffix()}
+	return []string{name + ctx.ArchSuffix}
 }
-func (r *cppBinary) NinjaEdge(m *parser.Module) string {
+func (r *cppBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	deps := GetListProp(m, "deps")
@@ -583,19 +572,19 @@ func (r *cppBinary) NinjaEdge(m *parser.Module) string {
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
-	cflags := joinFlags(getGlobalCflags(), getCflags(m))
+	cflags := joinFlags(ctx.CFlags, getCflags(m))
 	cppflags := getCppflags(m)
-	ldflags := joinFlags(getGlobalLdflags(), getLdflags(m))
+	ldflags := joinFlags(ctx.LdFlags, getLdflags(m))
 	allFlags := joinFlags(cflags, cppflags)
 	linkFlags := ldflags
 	var libFiles []string
 	for _, dep := range deps {
 		depName := strings.TrimPrefix(dep, ":")
-		libFiles = append(libFiles, getLibOutputName(depName))
+		libFiles = append(libFiles, staticLibOutputName(depName, ctx))
 	}
 	for _, dep := range sharedLibs {
 		depName := strings.TrimPrefix(dep, ":")
-		libFiles = append(libFiles, getSharedLibOutputName(depName))
+		libFiles = append(libFiles, sharedLibOutputName(depName, ctx))
 		linkFlags = joinFlags(linkFlags, "-l"+depName)
 	}
 	var edges strings.Builder
@@ -605,7 +594,7 @@ func (r *cppBinary) NinjaEdge(m *parser.Module) string {
 		objFiles = append(objFiles, obj)
 		edges.WriteString(fmt.Sprintf("build %s: cpp_compile %s\n flags = %s\n", obj, src, allFlags))
 	}
-	out := r.Outputs(m)[0]
+	out := r.Outputs(m, ctx)[0]
 	allInputs := append(objFiles, libFiles...)
 	edges.WriteString(fmt.Sprintf("build %s: cpp_link %s\n flags = %s\n", out, strings.Join(allInputs, " "), linkFlags))
 	return edges.String()
@@ -624,26 +613,26 @@ func (r *cppBinary) Desc(m *parser.Module, srcFile string) string {
 type goLibrary struct{}
 
 func (r *goLibrary) Name() string { return "go_library" }
-func (r *goLibrary) NinjaRule() string {
+func (r *goLibrary) NinjaRule(ctx RuleRenderContext) string {
 	return `rule go_build_archive
  command = go build -buildmode=archive -o $out $in
 `
 }
-func (r *goLibrary) Outputs(m *parser.Module) []string {
+func (r *goLibrary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
 	return []string{fmt.Sprintf("%s.a", name)}
 }
-func (r *goLibrary) NinjaEdge(m *parser.Module) string {
+func (r *goLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
 	goflags := getGoflags(m)
-	out := r.Outputs(m)[0]
+	out := r.Outputs(m, ctx)[0]
 	return fmt.Sprintf("build %s: go_build_archive %s\n flags = %s\n", out, strings.Join(srcs, " "), goflags)
 }
 func (r *goLibrary) Desc(m *parser.Module, srcFile string) string { return "go" }
@@ -654,19 +643,19 @@ func (r *goLibrary) Desc(m *parser.Module, srcFile string) string { return "go" 
 type goBinary struct{}
 
 func (r *goBinary) Name() string { return "go_binary" }
-func (r *goBinary) NinjaRule() string {
+func (r *goBinary) NinjaRule(ctx RuleRenderContext) string {
 	return `rule go_build
  command = go build -o $out $in
 `
 }
-func (r *goBinary) Outputs(m *parser.Module) []string {
+func (r *goBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
 	return []string{name}
 }
-func (r *goBinary) NinjaEdge(m *parser.Module) string {
+func (r *goBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	deps := GetListProp(m, "deps")
@@ -674,7 +663,7 @@ func (r *goBinary) NinjaEdge(m *parser.Module) string {
 		return ""
 	}
 	goflags := getGoflags(m)
-	out := r.Outputs(m)[0]
+	out := r.Outputs(m, ctx)[0]
 
 	var libFiles []string
 	for _, dep := range deps {
@@ -697,27 +686,27 @@ func (r *goBinary) Desc(m *parser.Module, srcFile string) string { return "go" }
 type goTest struct{}
 
 func (r *goTest) Name() string { return "go_test" }
-func (r *goTest) NinjaRule() string {
+func (r *goTest) NinjaRule(ctx RuleRenderContext) string {
 	return `rule go_test
  command = go test -c -o $out $pkg
 `
 }
 
-func (r *goTest) Outputs(m *parser.Module) []string {
+func (r *goTest) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
 	return []string{fmt.Sprintf("%s.test", name)}
 }
-func (r *goTest) NinjaEdge(m *parser.Module) string {
+func (r *goTest) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
 	goflags := getGoflags(m)
-	out := r.Outputs(m)[0]
+	out := r.Outputs(m, ctx)[0]
 	// Extract package path from first source file
 	// Convert "dag/graph_test.go" to "./dag"
 	pkgPath := "./" + filepath.Dir(srcs[0])
@@ -734,7 +723,7 @@ func (r *goTest) Desc(m *parser.Module, srcFile string) string { return "go test
 type javaLibrary struct{}
 
 func (r *javaLibrary) Name() string { return "java_library" }
-func (r *javaLibrary) NinjaRule() string {
+func (r *javaLibrary) NinjaRule(ctx RuleRenderContext) string {
 	return `rule javac_lib
   command = javac -d $outdir $in $flags
 
@@ -742,21 +731,21 @@ rule jar_create
   command = jar cf $out -C $outdir .
 `
 }
-func (r *javaLibrary) Outputs(m *parser.Module) []string {
+func (r *javaLibrary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
 	return []string{fmt.Sprintf("%s.jar", name)}
 }
-func (r *javaLibrary) NinjaEdge(m *parser.Module) string {
+func (r *javaLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
 	javaflags := getJavaflags(m)
-	out := r.Outputs(m)[0]
+	out := r.Outputs(m, ctx)[0]
 	outdir := name + "_classes"
 	var edges strings.Builder
 	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_lib %s\n outdir = %s\n flags = %s\n", name, strings.Join(srcs, " "), outdir, javaflags))
@@ -776,7 +765,7 @@ func (r *javaLibrary) Desc(m *parser.Module, srcFile string) string {
 type javaBinary struct{}
 
 func (r *javaBinary) Name() string { return "java_binary" }
-func (r *javaBinary) NinjaRule() string {
+func (r *javaBinary) NinjaRule(ctx RuleRenderContext) string {
 	return `rule javac_bin
   command = javac -d $outdir $in $flags
 
@@ -784,14 +773,14 @@ rule jar_create_executable
   command = jar cfe $out $main_class -C $outdir .
 `
 }
-func (r *javaBinary) Outputs(m *parser.Module) []string {
+func (r *javaBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
 	return []string{fmt.Sprintf("%s.jar", name)}
 }
-func (r *javaBinary) NinjaEdge(m *parser.Module) string {
+func (r *javaBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	mainClass := GetStringProp(m, "main_class")
@@ -799,7 +788,7 @@ func (r *javaBinary) NinjaEdge(m *parser.Module) string {
 		return ""
 	}
 	javaflags := getJavaflags(m)
-	out := r.Outputs(m)[0]
+	out := r.Outputs(m, ctx)[0]
 	outdir := name + "_classes"
 	var edges strings.Builder
 	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_bin %s\n outdir = %s\n flags = %s\n", name, strings.Join(srcs, " "), outdir, javaflags))
@@ -819,7 +808,7 @@ func (r *javaBinary) Desc(m *parser.Module, srcFile string) string {
 type javaLibraryStatic struct{}
 
 func (r *javaLibraryStatic) Name() string { return "java_library_static" }
-func (r *javaLibraryStatic) NinjaRule() string {
+func (r *javaLibraryStatic) NinjaRule(ctx RuleRenderContext) string {
 	return `rule javac_lib
   command = javac -d $outdir $in $flags
 
@@ -827,21 +816,21 @@ rule jar_create
   command = jar cf $out -C $outdir .
 `
 }
-func (r *javaLibraryStatic) Outputs(m *parser.Module) []string {
+func (r *javaLibraryStatic) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
 	return []string{fmt.Sprintf("lib%s.a.jar", name)}
 }
-func (r *javaLibraryStatic) NinjaEdge(m *parser.Module) string {
+func (r *javaLibraryStatic) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
 	javaflags := getJavaflags(m)
-	out := r.Outputs(m)[0]
+	out := r.Outputs(m, ctx)[0]
 	outdir := name + "_classes"
 	var edges strings.Builder
 	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_lib %s\n outdir = %s\n flags = %s\n", name, strings.Join(srcs, " "), outdir, javaflags))
@@ -861,7 +850,7 @@ func (r *javaLibraryStatic) Desc(m *parser.Module, srcFile string) string {
 type javaLibraryHost struct{}
 
 func (r *javaLibraryHost) Name() string { return "java_library_host" }
-func (r *javaLibraryHost) NinjaRule() string {
+func (r *javaLibraryHost) NinjaRule(ctx RuleRenderContext) string {
 	return `rule javac_lib
   command = javac -d $outdir $in $flags
 
@@ -869,21 +858,21 @@ rule jar_create
   command = jar cf $out -C $outdir .
 `
 }
-func (r *javaLibraryHost) Outputs(m *parser.Module) []string {
+func (r *javaLibraryHost) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
 	return []string{fmt.Sprintf("%s-host.jar", name)}
 }
-func (r *javaLibraryHost) NinjaEdge(m *parser.Module) string {
+func (r *javaLibraryHost) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
 	javaflags := getJavaflags(m)
-	out := r.Outputs(m)[0]
+	out := r.Outputs(m, ctx)[0]
 	outdir := name + "_classes"
 	var edges strings.Builder
 	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_lib %s\n outdir = %s\n flags = %s\n", name, strings.Join(srcs, " "), outdir, javaflags))
@@ -903,7 +892,7 @@ func (r *javaLibraryHost) Desc(m *parser.Module, srcFile string) string {
 type javaBinaryHost struct{}
 
 func (r *javaBinaryHost) Name() string { return "java_binary_host" }
-func (r *javaBinaryHost) NinjaRule() string {
+func (r *javaBinaryHost) NinjaRule(ctx RuleRenderContext) string {
 	return `rule javac_bin
   command = javac -d $outdir $in $flags
 
@@ -911,14 +900,14 @@ rule jar_create_executable
   command = jar cfe $out $main_class -C $outdir .
 `
 }
-func (r *javaBinaryHost) Outputs(m *parser.Module) []string {
+func (r *javaBinaryHost) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
 	return []string{fmt.Sprintf("%s-host.jar", name)}
 }
-func (r *javaBinaryHost) NinjaEdge(m *parser.Module) string {
+func (r *javaBinaryHost) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	mainClass := GetStringProp(m, "main_class")
@@ -926,7 +915,7 @@ func (r *javaBinaryHost) NinjaEdge(m *parser.Module) string {
 		return ""
 	}
 	javaflags := getJavaflags(m)
-	out := r.Outputs(m)[0]
+	out := r.Outputs(m, ctx)[0]
 	outdir := name + "_classes"
 	var edges strings.Builder
 	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_bin %s\n outdir = %s\n flags = %s\n", name, strings.Join(srcs, " "), outdir, javaflags))
@@ -946,7 +935,7 @@ func (r *javaBinaryHost) Desc(m *parser.Module, srcFile string) string {
 type javaTest struct{}
 
 func (r *javaTest) Name() string { return "java_test" }
-func (r *javaTest) NinjaRule() string {
+func (r *javaTest) NinjaRule(ctx RuleRenderContext) string {
 	return `rule javac_test
   command = javac -d $outdir $in $flags
 
@@ -954,21 +943,21 @@ rule jar_test
   command = jar cf $out -C $outdir .
 `
 }
-func (r *javaTest) Outputs(m *parser.Module) []string {
+func (r *javaTest) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
 	return []string{fmt.Sprintf("%s-test.jar", name)}
 }
-func (r *javaTest) NinjaEdge(m *parser.Module) string {
+func (r *javaTest) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
 	javaflags := getJavaflags(m)
-	out := r.Outputs(m)[0]
+	out := r.Outputs(m, ctx)[0]
 	outdir := name + "_classes"
 	var edges strings.Builder
 	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_test %s\n outdir = %s\n flags = %s\n", name, strings.Join(srcs, " "), outdir, javaflags))
@@ -988,7 +977,7 @@ func (r *javaTest) Desc(m *parser.Module, srcFile string) string {
 type javaImport struct{}
 
 func (r *javaImport) Name() string { return "java_import" }
-func (r *javaImport) NinjaRule() string {
+func (r *javaImport) NinjaRule(ctx RuleRenderContext) string {
 	copyCmd := "cp $in $out"
 	if runtime.GOOS == "windows" {
 		copyCmd = "cmd /c copy $in $out"
@@ -997,19 +986,19 @@ func (r *javaImport) NinjaRule() string {
  command = ` + copyCmd + `
 `
 }
-func (r *javaImport) Outputs(m *parser.Module) []string {
+func (r *javaImport) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
 	return []string{fmt.Sprintf("%s.jar", name)}
 }
-func (r *javaImport) NinjaEdge(m *parser.Module) string {
+func (r *javaImport) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	srcs := getSrcs(m)
 	if len(srcs) == 0 {
 		return ""
 	}
-	out := r.Outputs(m)[0]
+	out := r.Outputs(m, ctx)[0]
 	return fmt.Sprintf("build %s: java_import %s\n", out, strings.Join(srcs, " "))
 }
 func (r *javaImport) Desc(m *parser.Module, srcFile string) string { return "cp" }
@@ -1019,11 +1008,11 @@ func (r *javaImport) Desc(m *parser.Module, srcFile string) string { return "cp"
 // ============================================================================
 type filegroup struct{}
 
-func (r *filegroup) Name() string                                 { return "filegroup" }
-func (r *filegroup) NinjaRule() string                            { return "" }
-func (r *filegroup) Outputs(m *parser.Module) []string            { return nil }
-func (r *filegroup) NinjaEdge(m *parser.Module) string            { return "" }
-func (r *filegroup) Desc(m *parser.Module, srcFile string) string { return "filegroup" }
+func (r *filegroup) Name() string                                             { return "filegroup" }
+func (r *filegroup) NinjaRule(ctx RuleRenderContext) string                   { return "" }
+func (r *filegroup) Outputs(m *parser.Module, ctx RuleRenderContext) []string { return nil }
+func (r *filegroup) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string { return "" }
+func (r *filegroup) Desc(m *parser.Module, srcFile string) string             { return "filegroup" }
 
 // ============================================================================
 // custom
@@ -1031,15 +1020,15 @@ func (r *filegroup) Desc(m *parser.Module, srcFile string) string { return "file
 type customRule struct{}
 
 func (r *customRule) Name() string { return "custom" }
-func (r *customRule) NinjaRule() string {
+func (r *customRule) NinjaRule(ctx RuleRenderContext) string {
 	return `rule custom_command
  command = $cmd
 `
 }
-func (r *customRule) Outputs(m *parser.Module) []string {
+func (r *customRule) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	return GetListProp(m, "outs")
 }
-func (r *customRule) NinjaEdge(m *parser.Module) string {
+func (r *customRule) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	return customRuleEdge(m, "")
 }
 
@@ -1053,6 +1042,8 @@ func customRuleEdge(m *parser.Module, workDir string) string {
 	}
 	outStr := strings.Join(outs, " ")
 	srcStr := strings.Join(srcs, " ")
+	escapedOuts := strings.Join(escapeList(outs), " ")
+	escapedSrcs := strings.Join(escapeList(srcs), " ")
 
 	actualCmd := cmd
 	actualCmd = strings.ReplaceAll(actualCmd, "$in", srcStr)
@@ -1090,9 +1081,9 @@ func customRuleEdge(m *parser.Module, workDir string) string {
 
 	var result strings.Builder
 	if srcStr == "" {
-		result.WriteString(fmt.Sprintf("build %s: custom_command\n", outStr))
+		result.WriteString(fmt.Sprintf("build %s: custom_command\n", escapedOuts))
 	} else {
-		result.WriteString(fmt.Sprintf("build %s: custom_command %s\n", outStr, srcStr))
+		result.WriteString(fmt.Sprintf("build %s: custom_command %s\n", escapedOuts, escapedSrcs))
 	}
 	result.WriteString(fmt.Sprintf(" cmd = %s\n", actualCmd))
 
@@ -1106,16 +1097,16 @@ func (r *customRule) Desc(m *parser.Module, srcFile string) string { return "cus
 // ============================================================================
 type ccLibraryHeaders struct{}
 
-func (r *ccLibraryHeaders) Name() string      { return "cc_library_headers" }
-func (r *ccLibraryHeaders) NinjaRule() string { return "" }
-func (r *ccLibraryHeaders) Outputs(m *parser.Module) []string {
+func (r *ccLibraryHeaders) Name() string                           { return "cc_library_headers" }
+func (r *ccLibraryHeaders) NinjaRule(ctx RuleRenderContext) string { return "" }
+func (r *ccLibraryHeaders) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
 	return []string{name + ".h"}
 }
-func (r *ccLibraryHeaders) NinjaEdge(m *parser.Module) string {
+func (r *ccLibraryHeaders) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	return ""
 }
 func (r *ccLibraryHeaders) Desc(m *parser.Module, srcFile string) string { return "" }
@@ -1126,13 +1117,13 @@ func (r *ccLibraryHeaders) Desc(m *parser.Module, srcFile string) string { retur
 type protoLibraryRule struct{}
 
 func (r *protoLibraryRule) Name() string { return "proto_library" }
-func (r *protoLibraryRule) NinjaRule() string {
+func (r *protoLibraryRule) NinjaRule(ctx RuleRenderContext) string {
 	return `rule protoc
   command = protoc --proto_path=. $proto_paths $include_flags $plugin_flags --$out_type_out=$proto_out $in
   description = PROTOC $in
 `
 }
-func (r *protoLibraryRule) Outputs(m *parser.Module) []string {
+func (r *protoLibraryRule) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
@@ -1160,7 +1151,7 @@ func (r *protoLibraryRule) Outputs(m *parser.Module) []string {
 	}
 	return outs
 }
-func (r *protoLibraryRule) NinjaEdge(m *parser.Module) string {
+func (r *protoLibraryRule) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" || len(srcs) == 0 {
@@ -1191,7 +1182,7 @@ func (r *protoLibraryRule) NinjaEdge(m *parser.Module) string {
 
 	protoOut := name + "_proto_out"
 
-	outs := r.Outputs(m)
+	outs := r.Outputs(m, ctx)
 	if len(outs) == 0 {
 		return ""
 	}
@@ -1214,13 +1205,13 @@ func (r *protoLibraryRule) Desc(m *parser.Module, srcFile string) string { retur
 type protoGenRule struct{}
 
 func (r *protoGenRule) Name() string { return "proto_gen" }
-func (r *protoGenRule) NinjaRule() string {
+func (r *protoGenRule) NinjaRule(ctx RuleRenderContext) string {
 	return `rule protoc_gen
   command = protoc --proto_path=. $proto_paths $include_flags $plugin_flags --$out_type_out=$proto_out $in
   description = PROTOC $in
 `
 }
-func (r *protoGenRule) Outputs(m *parser.Module) []string {
+func (r *protoGenRule) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
@@ -1244,7 +1235,7 @@ func (r *protoGenRule) Outputs(m *parser.Module) []string {
 	}
 	return outs
 }
-func (r *protoGenRule) NinjaEdge(m *parser.Module) string {
+func (r *protoGenRule) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" || len(srcs) == 0 {
@@ -1275,7 +1266,7 @@ func (r *protoGenRule) NinjaEdge(m *parser.Module) string {
 
 	protoOut := name + "_proto_out"
 
-	outs := r.Outputs(m)
+	outs := r.Outputs(m, ctx)
 	if len(outs) == 0 {
 		return ""
 	}
