@@ -178,7 +178,10 @@ func main() {
 
 		eval.EvalModule(mod)
 		mergeVariantProps(mod, *archFlag, *hostFlag, eval)
-		expandGlobsInModule(mod, srcDir)
+		if err := expandGlobsInModule(mod, srcDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Error expanding globs for module %s: %v\n", name, err)
+			os.Exit(1)
+		}
 		modules[name] = mod
 	}
 
@@ -357,9 +360,9 @@ func mergeMapProps(m *parser.Module, override *parser.Map) {
 	}
 }
 
-func expandGlobsInModule(m *parser.Module, baseDir string) {
+func expandGlobsInModule(m *parser.Module, baseDir string) error {
 	if m.Map == nil {
-		return
+		return nil
 	}
 
 	for _, prop := range m.Map.Properties {
@@ -372,7 +375,10 @@ func expandGlobsInModule(m *parser.Module, baseDir string) {
 					if s, ok := v.(*parser.String); ok {
 						pattern := s.Value
 						if strings.Contains(pattern, "*") {
-							matches := expandGlob(pattern, baseDir)
+							matches, err := expandGlob(pattern, baseDir)
+							if err != nil {
+								return err
+							}
 							for _, match := range matches {
 								if !seen[match] {
 									seen[match] = true
@@ -388,41 +394,53 @@ func expandGlobsInModule(m *parser.Module, baseDir string) {
 					}
 				}
 
-				if len(expandedSrcs) > 0 {
-					l.Values = expandedSrcs
-				}
+				l.Values = expandedSrcs
 			}
 		}
 	}
+
+	return nil
 }
 
-func expandGlob(pattern, baseDir string) []string {
+func expandGlob(pattern, baseDir string) ([]string, error) {
 	var result []string
 
 	if strings.Contains(pattern, "**") {
 		walkDir := recursiveGlobRoot(pattern, baseDir)
 
-		filepath.Walk(walkDir, func(path string, info os.FileInfo, err error) error {
+		err := filepath.Walk(walkDir, func(path string, info os.FileInfo, err error) error {
 			if err != nil || info.IsDir() {
-				return nil
+				return err
 			}
-			relPath, _ := filepath.Rel(baseDir, path)
+			relPath, err := filepath.Rel(baseDir, path)
+			if err != nil {
+				return err
+			}
 			relPath = filepath.ToSlash(relPath)
 			if matchRecursivePattern(filepath.ToSlash(pattern), relPath) {
 				result = append(result, relPath)
 			}
 			return nil
 		})
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		fullPattern := filepath.Join(baseDir, pattern)
-		matches, _ := filepath.Glob(fullPattern)
+		matches, err := filepath.Glob(fullPattern)
+		if err != nil {
+			return nil, err
+		}
 		for _, match := range matches {
-			relPath, _ := filepath.Rel(baseDir, match)
+			relPath, err := filepath.Rel(baseDir, match)
+			if err != nil {
+				return nil, err
+			}
 			result = append(result, relPath)
 		}
 	}
 
-	return result
+	return result, nil
 }
 
 func recursiveGlobRoot(pattern, baseDir string) string {

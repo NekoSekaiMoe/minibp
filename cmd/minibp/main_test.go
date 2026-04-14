@@ -16,7 +16,10 @@ func TestExpandGlobRecursiveExtension(t *testing.T) {
 	writeTestFile(t, filepath.Join(baseDir, "nested", "child.go"))
 	writeTestFile(t, filepath.Join(baseDir, "nested", "child.txt"))
 
-	got := expandGlob("**/*.go", baseDir)
+	got, err := expandGlob("**/*.go", baseDir)
+	if err != nil {
+		t.Fatalf("expandGlob returned error: %v", err)
+	}
 	sort.Strings(got)
 
 	want := []string{"nested/child.go", "root.go"}
@@ -31,7 +34,10 @@ func TestExpandGlobRecursiveUnderPrefix(t *testing.T) {
 	writeTestFile(t, filepath.Join(baseDir, "src", "deep", "child.go"))
 	writeTestFile(t, filepath.Join(baseDir, "other", "outside.go"))
 
-	got := expandGlob("src/**/*.go", baseDir)
+	got, err := expandGlob("src/**/*.go", baseDir)
+	if err != nil {
+		t.Fatalf("expandGlob returned error: %v", err)
+	}
 	sort.Strings(got)
 
 	want := []string{"src/deep/child.go", "src/root.go"}
@@ -45,7 +51,10 @@ func TestExpandGlobNonRecursive(t *testing.T) {
 	writeTestFile(t, filepath.Join(baseDir, "root.go"))
 	writeTestFile(t, filepath.Join(baseDir, "nested", "child.go"))
 
-	got := expandGlob("*.go", baseDir)
+	got, err := expandGlob("*.go", baseDir)
+	if err != nil {
+		t.Fatalf("expandGlob returned error: %v", err)
+	}
 	sort.Strings(got)
 
 	want := []string{"root.go"}
@@ -78,7 +87,9 @@ func TestMergeVariantPropsBeforeGlobExpansion(t *testing.T) {
 	}
 
 	mergeVariantProps(mod, "arm64", false, nil)
-	expandGlobsInModule(mod, baseDir)
+	if err := expandGlobsInModule(mod, baseDir); err != nil {
+		t.Fatalf("expandGlobsInModule returned error: %v", err)
+	}
 
 	srcsProp := findModuleProp(mod, "srcs")
 	if srcsProp == nil {
@@ -108,7 +119,10 @@ func TestExpandGlobNoMatchesReturnsEmpty(t *testing.T) {
 	baseDir := t.TempDir()
 	writeTestFile(t, filepath.Join(baseDir, "main.go"))
 
-	got := expandGlob("missing/*.go", baseDir)
+	got, err := expandGlob("missing/*.go", baseDir)
+	if err != nil {
+		t.Fatalf("expandGlob returned error: %v", err)
+	}
 	if len(got) != 0 {
 		t.Fatalf("Expected no matches, got %v", got)
 	}
@@ -130,7 +144,9 @@ func TestExpandGlobsInModuleDeduplicatesSrcs(t *testing.T) {
 		}},
 	}
 
-	expandGlobsInModule(mod, baseDir)
+	if err := expandGlobsInModule(mod, baseDir); err != nil {
+		t.Fatalf("expandGlobsInModule returned error: %v", err)
+	}
 
 	srcsProp := findModuleProp(mod, "srcs")
 	list := srcsProp.Value.(*parser.List)
@@ -142,6 +158,44 @@ func TestExpandGlobsInModuleDeduplicatesSrcs(t *testing.T) {
 	want := []string{"common.go", "nested/extra.go"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("expanded srcs = %v, want %v", got, want)
+	}
+}
+
+func TestExpandGlobsInModuleDropsUnmatchedPatterns(t *testing.T) {
+	baseDir := t.TempDir()
+	writeTestFile(t, filepath.Join(baseDir, "common.go"))
+
+	mod := &parser.Module{
+		Type: "go_library",
+		Map: &parser.Map{Properties: []*parser.Property{
+			{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+				&parser.String{Value: "missing/*.go"},
+				&parser.String{Value: "common.go"},
+			}}},
+		}},
+	}
+
+	if err := expandGlobsInModule(mod, baseDir); err != nil {
+		t.Fatalf("expandGlobsInModule returned error: %v", err)
+	}
+
+	srcsProp := findModuleProp(mod, "srcs")
+	list := srcsProp.Value.(*parser.List)
+	got := make([]string, 0, len(list.Values))
+	for _, item := range list.Values {
+		got = append(got, item.(*parser.String).Value)
+	}
+
+	want := []string{"common.go"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expanded srcs = %v, want %v", got, want)
+	}
+}
+
+func TestExpandGlobInvalidPatternReturnsError(t *testing.T) {
+	baseDir := t.TempDir()
+	if _, err := expandGlob("[", baseDir); err == nil {
+		t.Fatal("Expected invalid glob pattern error")
 	}
 }
 
