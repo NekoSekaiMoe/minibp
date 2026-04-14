@@ -215,7 +215,7 @@ func (g *Generator) Generate(w io.Writer) error {
 		nw.Comment("")
 	}
 
-	// Set toolchain env vars before generating rules (rules read them via getCC/getCXX/getAR)
+	// Set toolchain env vars before generating rules.
 	tc := g.toolchain
 	if tc.CC == "" {
 		tc.CC = "gcc"
@@ -226,15 +226,26 @@ func (g *Generator) Generate(w io.Writer) error {
 	if tc.AR == "" {
 		tc.AR = "ar"
 	}
-	os.Setenv("MINIBP_CC", tc.CC)
-	os.Setenv("MINIBP_CXX", tc.CXX)
-	os.Setenv("MINIBP_AR", tc.AR)
+	archCFlags, archLdFlags := archFlags(g.arch)
+	tc.CFlags = append(append([]string{}, tc.CFlags...), archCFlags...)
+	tc.LdFlags = append(append([]string{}, tc.LdFlags...), archLdFlags...)
+
+	env := map[string]string{
+		"MINIBP_CC":      tc.CC,
+		"MINIBP_CXX":     tc.CXX,
+		"MINIBP_AR":      tc.AR,
+		"MINIBP_CFLAGS":  strings.Join(tc.CFlags, " "),
+		"MINIBP_LDFLAGS": strings.Join(tc.LdFlags, " "),
+	}
 	archSuffix := ""
 	if g.arch != "" {
-		os.Setenv("MINIBP_ARCH", g.arch)
+		env["MINIBP_ARCH"] = g.arch
 		archSuffix = "_" + g.arch
 	}
-	os.Setenv("MINIBP_ARCH_SUFFIX", archSuffix)
+	env["MINIBP_ARCH_SUFFIX"] = archSuffix
+	env["MINIBP_SOURCE_PREFIX"] = g.getRelativePath("")
+	restoreEnv := applyEnv(env)
+	defer restoreEnv()
 
 	usedModuleTypes := g.collectUsedModuleTypes()
 
@@ -269,9 +280,8 @@ func (g *Generator) Generate(w io.Writer) error {
 		return err
 	}
 
-	os.Setenv("MINIBP_SOURCE_PREFIX", g.getRelativePath(""))
-
 	var allOutputs []string
+	seenCleanOutputs := make(map[string]bool)
 
 	for _, level := range levels {
 		for _, moduleName := range level {
@@ -327,8 +337,11 @@ func (g *Generator) Generate(w io.Writer) error {
 				edgeDef = g.addIncludesToEdge(edgeDef, includes)
 			}
 
-			if outputs := rule.Outputs(m); len(outputs) > 0 {
-				allOutputs = append(allOutputs, outputs...)
+			for _, out := range collectBuildOutputs(edgeDef) {
+				if !seenCleanOutputs[out] {
+					seenCleanOutputs[out] = true
+					allOutputs = append(allOutputs, out)
+				}
 			}
 
 			srcs := getSrcs(m)
@@ -393,6 +406,44 @@ func (g *Generator) Generate(w io.Writer) error {
 	return nil
 }
 
+func applyEnv(vars map[string]string) func() {
+	prev := make(map[string]*string, len(vars))
+	for key, value := range vars {
+		if old, ok := os.LookupEnv(key); ok {
+			oldCopy := old
+			prev[key] = &oldCopy
+		} else {
+			prev[key] = nil
+		}
+		_ = os.Setenv(key, value)
+	}
+
+	return func() {
+		for key, old := range prev {
+			if old == nil {
+				_ = os.Unsetenv(key)
+				continue
+			}
+			_ = os.Setenv(key, *old)
+		}
+	}
+}
+
+func archFlags(arch string) (cflags []string, ldflags []string) {
+	switch arch {
+	case "x86":
+		return []string{"-m32"}, []string{"-m32"}
+	case "x86_64":
+		return []string{"-m64"}, []string{"-m64"}
+	case "arm":
+		return []string{"-march=armv7-a"}, []string{"-march=armv7-a"}
+	case "arm64":
+		return []string{"-march=armv8-a"}, []string{"-march=armv8-a"}
+	default:
+		return nil, nil
+	}
+}
+
 func shellQuote(arg string) string {
 	return "\"" + strings.ReplaceAll(arg, "\"", "\\\"") + "\""
 }
@@ -406,6 +457,35 @@ func cleanCommand(outputs []string) string {
 		return "cmd /c del /q " + strings.Join(quoted, " ")
 	}
 	return "rm -f " + strings.Join(quoted, " ")
+}
+
+func collectBuildOutputs(edge string) []string {
+	if edge == "" {
+		return nil
+	}
+
+	var outputs []string
+	seen := make(map[string]bool)
+	for _, line := range strings.Split(edge, "\n") {
+		if !strings.HasPrefix(line, "build ") {
+			continue
+		}
+
+		rest := strings.TrimPrefix(line, "build ")
+		parts := strings.SplitN(rest, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		for _, out := range strings.Fields(parts[0]) {
+			if !seen[out] {
+				seen[out] = true
+				outputs = append(outputs, out)
+			}
+		}
+	}
+
+	return outputs
 }
 
 // addIncludesToEdge adds include directories to compile commands
@@ -503,6 +583,26 @@ func (g *Generator) addJavaDepsToEdge(m *parser.Module, edge string) string {
 }
 
 // adjustPaths updates paths in ninja edge to be relative to output directory
+func (g *Generator) shouldPrefixInputPath(path string) bool {
+	return !strings.HasPrefix(path, "$") &&
+		!strings.HasPrefix(path, g.pathPrefix) &&
+		!strings.HasPrefix(path, "/") &&
+		!strings.HasPrefix(path, "..") &&
+		!strings.HasSuffix(path, ".o") &&
+		!strings.HasSuffix(path, ".a") &&
+		!strings.HasSuffix(path, ".so") &&
+		!strings.HasSuffix(path, ".jar") &&
+		!strings.HasSuffix(path, ".stamp")
+}
+
+func (g *Generator) shouldPrefixOutputPath(path string) bool {
+	return path != "" &&
+		!strings.HasPrefix(path, g.pathPrefix) &&
+		!strings.HasPrefix(path, "/") &&
+		!strings.HasPrefix(path, "..") &&
+		strings.Contains(path, "/")
+}
+
 func (g *Generator) adjustPaths(edge string) string {
 	if g.pathPrefix == "" {
 		return edge
@@ -523,7 +623,14 @@ func (g *Generator) adjustPaths(edge string) string {
 			continue
 		}
 
-		colonPart := re[0] + ": "
+		outputs := strings.Fields(strings.TrimPrefix(re[0], "build "))
+		for i, output := range outputs {
+			if g.shouldPrefixOutputPath(output) {
+				outputs[i] = g.pathPrefix + output
+			}
+		}
+
+		colonPart := "build " + strings.Join(outputs, " ") + ": "
 		ruleAndInputs := re[1]
 
 		fields := strings.Fields(ruleAndInputs)
@@ -537,15 +644,7 @@ func (g *Generator) adjustPaths(edge string) string {
 			if input == "|" {
 				continue
 			}
-			if !strings.HasPrefix(input, "$") &&
-				!strings.HasPrefix(input, g.pathPrefix) &&
-				!strings.HasPrefix(input, "/") &&
-				!strings.HasPrefix(input, "..") &&
-				!strings.HasSuffix(input, ".o") &&
-				!strings.HasSuffix(input, ".a") &&
-				!strings.HasSuffix(input, ".so") &&
-				!strings.HasSuffix(input, ".jar") &&
-				!strings.HasSuffix(input, ".stamp") {
+			if g.shouldPrefixInputPath(input) {
 				inputs[i] = g.pathPrefix + input
 			}
 		}

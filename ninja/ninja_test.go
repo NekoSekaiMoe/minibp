@@ -131,6 +131,20 @@ func TestCleanCommandQuotesOutputs(t *testing.T) {
 	}
 }
 
+func TestCollectBuildOutputs(t *testing.T) {
+	edge := "build foo.o: cc_compile foo.c\n flags = -Wall\nbuild app libapp.map: cc_link foo.o\n"
+	outputs := collectBuildOutputs(edge)
+	want := []string{"foo.o", "app", "libapp.map"}
+	if len(outputs) != len(want) {
+		t.Fatalf("Expected %d outputs, got %d: %v", len(want), len(outputs), outputs)
+	}
+	for i, out := range want {
+		if outputs[i] != out {
+			t.Fatalf("Expected output %d to be %q, got %q", i, out, outputs[i])
+		}
+	}
+}
+
 func TestJavaImportRuleUsesPlatformCopyCommand(t *testing.T) {
 	r := &javaImport{}
 	rule := r.NinjaRule()
@@ -293,6 +307,139 @@ func TestGeneratorPhonyTargets(t *testing.T) {
 
 	if !strings.Contains(output, "build mylib: phony libmylib.a") {
 		t.Errorf("Expected phony target for mylib, got: %s", output)
+	}
+}
+
+func TestGeneratorAppliesToolchainAndArchFlags(t *testing.T) {
+	g := dag.NewGraph()
+
+	m := &parser.Module{
+		Type: "cc_binary",
+		Map: &parser.Map{
+			Properties: []*parser.Property{
+				{Name: "name", Value: &parser.String{Value: "app"}},
+				{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "main.c"},
+				}}},
+				{Name: "cflags", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "-DMODULE"},
+				}}},
+				{Name: "ldflags", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "-pthread"},
+				}}},
+			},
+		},
+	}
+
+	rules := map[string]BuildRule{
+		"cc_binary": &ccBinary{},
+	}
+
+	modules := map[string]*parser.Module{
+		"app": m,
+	}
+	g.AddModule(&dagMockModule{name: "app"})
+
+	gen := NewGenerator(g, rules, modules)
+	gen.SetToolchain(Toolchain{
+		CC:      "clang",
+		CXX:     "clang++",
+		AR:      "llvm-ar",
+		CFlags:  []string{"--sysroot=/opt/sdk", "-DTOOLCHAIN"},
+		LdFlags: []string{"-fuse-ld=lld"},
+	})
+	gen.SetArch("x86_64")
+
+	var buf bytes.Buffer
+	if err := gen.Generate(&buf); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "command = clang -c $in -o $out $flags -MMD -MF $out.d") {
+		t.Fatalf("Expected configured compiler in compile rule, got: %s", output)
+	}
+	if !strings.Contains(output, "command = clang -o $out $in $flags") {
+		t.Fatalf("Expected configured compiler in link rule, got: %s", output)
+	}
+	if !strings.Contains(output, "flags = --sysroot=/opt/sdk -DTOOLCHAIN -m64 -DMODULE -I.\n") {
+		t.Fatalf("Expected merged compile flags in edge, got: %s", output)
+	}
+	if !strings.Contains(output, "flags = -fuse-ld=lld -m64 -pthread -I.\n") {
+		t.Fatalf("Expected merged link flags in edge, got: %s", output)
+	}
+	if !strings.Contains(output, "build app_x86_64: cc_link app_main.o") {
+		t.Fatalf("Expected arch-suffixed binary output, got: %s", output)
+	}
+	if !strings.Contains(output, "build app_main.o: cc_compile main.c") {
+		t.Fatalf("Expected object compile edge, got: %s", output)
+	}
+	if got := os.Getenv("MINIBP_CFLAGS"); got != "" {
+		t.Fatalf("Expected MINIBP_CFLAGS restored after generation, got %q", got)
+	}
+	if got := os.Getenv("MINIBP_LDFLAGS"); got != "" {
+		t.Fatalf("Expected MINIBP_LDFLAGS restored after generation, got %q", got)
+	}
+}
+
+func TestGeneratorCleanTargetUsesBuildOutputs(t *testing.T) {
+	g := dag.NewGraph()
+
+	lib := &parser.Module{
+		Type: "cc_library",
+		Map: &parser.Map{
+			Properties: []*parser.Property{
+				{Name: "name", Value: &parser.String{Value: "mylib"}},
+				{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "src/main.c"},
+					&parser.String{Value: "src/util.c"},
+				}}},
+			},
+		},
+	}
+
+	headers := &parser.Module{
+		Type: "cc_library_headers",
+		Map: &parser.Map{
+			Properties: []*parser.Property{
+				{Name: "name", Value: &parser.String{Value: "hdrs"}},
+			},
+		},
+	}
+
+	rules := map[string]BuildRule{
+		"cc_library":         &ccLibrary{},
+		"cc_library_headers": &ccLibraryHeaders{},
+	}
+
+	modules := map[string]*parser.Module{
+		"mylib": lib,
+		"hdrs":  headers,
+	}
+
+	g.AddModule(&dagMockModule{name: "mylib"})
+	g.AddModule(&dagMockModule{name: "hdrs"})
+
+	gen := NewGenerator(g, rules, modules)
+
+	var buf bytes.Buffer
+	err := gen.Generate(&buf)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "rule clean") {
+		t.Fatalf("Expected clean rule in output, got: %s", output)
+	}
+	if !strings.Contains(output, "\"mylib_src_main.o\"") || !strings.Contains(output, "\"mylib_src_util.o\"") {
+		t.Fatalf("Expected object files in clean command, got: %s", output)
+	}
+	if !strings.Contains(output, "\"libmylib.a\"") {
+		t.Fatalf("Expected final library output in clean command, got: %s", output)
+	}
+	if strings.Contains(output, "\"hdrs.h\"") {
+		t.Fatalf("Did not expect header-only pseudo output in clean command, got: %s", output)
 	}
 }
 
@@ -631,6 +778,100 @@ func TestGeneratorAddsIncludesFromSharedLibs(t *testing.T) {
 	}
 }
 
+func TestCCBinarySeparatesCompileAndLinkFlags(t *testing.T) {
+	r := &ccBinary{}
+	m := &parser.Module{
+		Type: "cc_binary",
+		Map: &parser.Map{Properties: []*parser.Property{
+			{Name: "name", Value: &parser.String{Value: "app"}},
+			{Name: "srcs", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: "app.c"}}}},
+			{Name: "cflags", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: "-O2"}}}},
+			{Name: "ldflags", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: "-pthread"}}}},
+			{Name: "shared_libs", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: ":base"}}}},
+		}},
+	}
+
+	edge := r.NinjaEdge(m)
+	if !strings.Contains(edge, "build app_app.o: cc_compile app.c\n flags = -O2\n") {
+		t.Fatalf("Expected compile edge to use only cflags, got: %s", edge)
+	}
+	if !strings.Contains(edge, "build app: cc_link app_app.o libbase.so\n flags = -pthread -lbase\n") {
+		t.Fatalf("Expected link edge to use only ldflags plus shared libs, got: %s", edge)
+	}
+	if strings.Contains(edge, "cc_link app_app.o libbase.so\n flags = -O2") {
+		t.Fatalf("Expected cflags to be excluded from link edge, got: %s", edge)
+	}
+}
+
+func TestGeneratorAppliesToolchainFlagsToCAndCppEdges(t *testing.T) {
+	g := dag.NewGraph()
+	ccModule := &parser.Module{
+		Type: "cc_binary",
+		Map: &parser.Map{Properties: []*parser.Property{
+			{Name: "name", Value: &parser.String{Value: "capp"}},
+			{Name: "srcs", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: "app.c"}}}},
+			{Name: "cflags", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: "-O2"}}}},
+			{Name: "ldflags", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: "-pthread"}}}},
+		}},
+	}
+	cppModule := &parser.Module{
+		Type: "cpp_binary",
+		Map: &parser.Map{Properties: []*parser.Property{
+			{Name: "name", Value: &parser.String{Value: "cppapp"}},
+			{Name: "srcs", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: "app.cpp"}}}},
+			{Name: "cflags", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: "-fPIC"}}}},
+			{Name: "cppflags", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: "-std=c++20"}}}},
+			{Name: "ldflags", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: "-Wl,--as-needed"}}}},
+		}},
+	}
+
+	rules := map[string]BuildRule{
+		"cc_binary":  &ccBinary{},
+		"cpp_binary": &cppBinary{},
+	}
+	modules := map[string]*parser.Module{
+		"capp":   ccModule,
+		"cppapp": cppModule,
+	}
+
+	g.AddModule(&dagMockModule{name: "capp"})
+	g.AddModule(&dagMockModule{name: "cppapp"})
+
+	gen := NewGenerator(g, rules, modules)
+	gen.SetToolchain(Toolchain{
+		CC:      "gcc",
+		CXX:     "g++",
+		AR:      "ar",
+		CFlags:  []string{"-DGLOBAL"},
+		LdFlags: []string{"-Wl,--gc-sections"},
+	})
+
+	var buf bytes.Buffer
+	if err := gen.Generate(&buf); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "build capp_app.o: cc_compile app.c\n flags = -DGLOBAL -O2") {
+		t.Fatalf("Expected cc compile edge to include global and module cflags, got: %s", output)
+	}
+	if !strings.Contains(output, "build capp: cc_link capp_app.o\n flags = -Wl,--gc-sections -pthread") {
+		t.Fatalf("Expected cc link edge to include global and module ldflags, got: %s", output)
+	}
+	if strings.Contains(output, "build capp: cc_link capp_app.o\n flags = -DGLOBAL") {
+		t.Fatalf("Expected cc compile flags to be excluded from link edge, got: %s", output)
+	}
+	if !strings.Contains(output, "build cppapp_app.o: cpp_compile app.cpp\n flags = -DGLOBAL -fPIC -std=c++20") {
+		t.Fatalf("Expected cpp compile edge to include global cflags, module cflags, and cppflags, got: %s", output)
+	}
+	if !strings.Contains(output, "build cppapp: cpp_link cppapp_app.o\n flags = -Wl,--gc-sections -Wl,--as-needed") {
+		t.Fatalf("Expected cpp link edge to include global and module ldflags, got: %s", output)
+	}
+	if strings.Contains(output, "build cppapp: cpp_link cppapp_app.o\n flags = -DGLOBAL") {
+		t.Fatalf("Expected cpp compile flags to be excluded from link edge, got: %s", output)
+	}
+}
+
 func TestGeneratorDeduplicatesCustomRulesForSameCommand(t *testing.T) {
 	g := dag.NewGraph()
 
@@ -770,6 +1011,42 @@ func TestGeneratorPreservesJavaJarDependencyPaths(t *testing.T) {
 	}
 	if !strings.Contains(output, "-classpath libjava.jar") {
 		t.Fatalf("Expected generated javac flags to include dependency classpath, got: %s", output)
+	}
+}
+
+func TestGeneratorRewritesExplicitRelativeOutputsForExternalNinja(t *testing.T) {
+	g := dag.NewGraph()
+
+	m := &parser.Module{Type: "custom", Map: &parser.Map{Properties: []*parser.Property{
+		{Name: "name", Value: &parser.String{Value: "copy_assets"}},
+		{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+			&parser.String{Value: "assets/config.json"},
+		}}},
+		{Name: "outs", Value: &parser.List{Values: []parser.Expression{
+			&parser.String{Value: "out/config.json"},
+		}}},
+		{Name: "cmd", Value: &parser.String{Value: "cp $in $out"}},
+	}}}
+
+	rules := map[string]BuildRule{"custom": &customRule{}}
+	modules := map[string]*parser.Module{"copy_assets": m}
+
+	g.AddModule(&dagMockModule{name: "copy_assets"})
+
+	gen := NewGenerator(g, rules, modules)
+	gen.SetPathPrefix("examples/")
+
+	var buf bytes.Buffer
+	if err := gen.Generate(&buf); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "build examples/out/config.json: custom_command examples/assets/config.json") {
+		t.Fatalf("Expected explicit relative output and input paths to be rewritten for external ninja, got: %s", output)
+	}
+	if !strings.Contains(output, "cmd = cp assets/config.json out/config.json") {
+		t.Fatalf("Expected custom command payload to remain source-relative, got: %s", output)
 	}
 }
 

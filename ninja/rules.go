@@ -152,6 +152,25 @@ func getArchSuffix() string {
 	return os.Getenv("MINIBP_ARCH_SUFFIX")
 }
 
+func getGlobalCflags() string {
+	return os.Getenv("MINIBP_CFLAGS")
+}
+
+func getGlobalLdflags() string {
+	return os.Getenv("MINIBP_LDFLAGS")
+}
+
+func joinFlags(parts ...string) string {
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			filtered = append(filtered, part)
+		}
+	}
+	return strings.Join(filtered, " ")
+}
+
 // ============================================================================
 // cc_library - C library (static by default, shared if shared: true)
 // ============================================================================
@@ -219,15 +238,15 @@ func (r *ccLibrary) NinjaEdge(m *parser.Module) string {
 		return ""
 	}
 	shared := getBoolProp(m, "shared")
-	cflags := getCflags(m)
-	ldflags := getLdflags(m)
+	cflags := joinFlags(getGlobalCflags(), getCflags(m))
+	ldflags := joinFlags(getGlobalLdflags(), getLdflags(m))
 	var sharedInputs []string
 	sharedLibs := GetListProp(m, "shared_libs")
 	if shared && len(sharedLibs) > 0 {
 		for _, dep := range sharedLibs {
 			depName := strings.TrimPrefix(dep, ":")
 			sharedInputs = append(sharedInputs, getSharedLibOutputName(depName))
-			ldflags += " -l" + depName
+			ldflags = joinFlags(ldflags, "-l"+depName)
 		}
 	}
 	var edges strings.Builder
@@ -275,7 +294,7 @@ func (r *ccLibraryStatic) NinjaEdge(m *parser.Module) string {
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
-	cflags := getCflags(m)
+	cflags := joinFlags(getGlobalCflags(), getCflags(m))
 	var edges strings.Builder
 	var objFiles []string
 	for _, src := range srcs {
@@ -310,14 +329,14 @@ func (r *ccLibraryShared) NinjaEdge(m *parser.Module) string {
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
-	cflags := getCflags(m)
-	ldflags := getLdflags(m)
+	cflags := joinFlags(getGlobalCflags(), getCflags(m))
+	ldflags := joinFlags(getGlobalLdflags(), getLdflags(m))
 	var sharedInputs []string
 	sharedLibs := GetListProp(m, "shared_libs")
 	for _, dep := range sharedLibs {
 		depName := strings.TrimPrefix(dep, ":")
 		sharedInputs = append(sharedInputs, getSharedLibOutputName(depName))
-		ldflags += " -l" + depName
+		ldflags = joinFlags(ldflags, "-l"+depName)
 	}
 	var edges strings.Builder
 	var objFiles []string
@@ -372,7 +391,7 @@ func (r *ccObject) NinjaEdge(m *parser.Module) string {
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
-	cflags := getCflags(m)
+	cflags := joinFlags(getGlobalCflags(), getCflags(m))
 	if len(srcs) == 1 {
 		out := r.Outputs(m)[0]
 		return fmt.Sprintf("build %s: cc_compile %s\n flags = %s\n", out, srcs[0], cflags)
@@ -425,15 +444,9 @@ func (r *ccBinary) NinjaEdge(m *parser.Module) string {
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
-	cflags := getCflags(m)
-	ldflags := getLdflags(m)
-	allFlags := cflags
-	if ldflags != "" {
-		if allFlags != "" {
-			allFlags += " "
-		}
-		allFlags += ldflags
-	}
+	cflags := joinFlags(getGlobalCflags(), getCflags(m))
+	ldflags := joinFlags(getGlobalLdflags(), getLdflags(m))
+	linkFlags := ldflags
 	var libFiles []string
 	for _, dep := range deps {
 		depName := strings.TrimPrefix(dep, ":")
@@ -442,7 +455,7 @@ func (r *ccBinary) NinjaEdge(m *parser.Module) string {
 	for _, dep := range sharedLibs {
 		depName := strings.TrimPrefix(dep, ":")
 		libFiles = append(libFiles, getSharedLibOutputName(depName))
-		allFlags += " -l" + depName
+		linkFlags = joinFlags(linkFlags, "-l"+depName)
 	}
 	var edges strings.Builder
 	var objFiles []string
@@ -453,7 +466,7 @@ func (r *ccBinary) NinjaEdge(m *parser.Module) string {
 	}
 	out := r.Outputs(m)[0]
 	allInputs := append(objFiles, libFiles...)
-	edges.WriteString(fmt.Sprintf("build %s: cc_link %s\n flags = %s\n", out, strings.Join(allInputs, " "), allFlags))
+	edges.WriteString(fmt.Sprintf("build %s: cc_link %s\n flags = %s\n", out, strings.Join(allInputs, " "), linkFlags))
 	return edges.String()
 }
 func (r *ccBinary) Desc(m *parser.Module, srcFile string) string {
@@ -503,20 +516,14 @@ func (r *cppLibrary) NinjaEdge(m *parser.Module) string {
 	cflags := getCflags(m)
 	cppflags := getCppflags(m)
 	ldflags := getLdflags(m)
-	allFlags := cflags
-	if cppflags != "" {
-		if allFlags != "" {
-			allFlags += " "
-		}
-		allFlags += cppflags
-	}
+	allFlags := joinFlags(cflags, cppflags)
 	var sharedInputs []string
 	if shared {
 		sharedLibs := GetListProp(m, "shared_libs")
 		for _, dep := range sharedLibs {
 			depName := strings.TrimPrefix(dep, ":")
 			sharedInputs = append(sharedInputs, getSharedLibOutputName(depName))
-			ldflags += " -l" + depName
+			ldflags = joinFlags(ldflags, "-l"+depName)
 		}
 	}
 	var edges strings.Builder
@@ -576,16 +583,11 @@ func (r *cppBinary) NinjaEdge(m *parser.Module) string {
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
-	cflags := getCflags(m)
+	cflags := joinFlags(getGlobalCflags(), getCflags(m))
 	cppflags := getCppflags(m)
-	ldflags := getLdflags(m)
-	allFlags := cflags
-	if cppflags != "" {
-		if allFlags != "" {
-			allFlags += " "
-		}
-		allFlags += cppflags
-	}
+	ldflags := joinFlags(getGlobalLdflags(), getLdflags(m))
+	allFlags := joinFlags(cflags, cppflags)
+	linkFlags := ldflags
 	var libFiles []string
 	for _, dep := range deps {
 		depName := strings.TrimPrefix(dep, ":")
@@ -594,7 +596,7 @@ func (r *cppBinary) NinjaEdge(m *parser.Module) string {
 	for _, dep := range sharedLibs {
 		depName := strings.TrimPrefix(dep, ":")
 		libFiles = append(libFiles, getSharedLibOutputName(depName))
-		allFlags += " -l" + depName
+		linkFlags = joinFlags(linkFlags, "-l"+depName)
 	}
 	var edges strings.Builder
 	var objFiles []string
@@ -605,7 +607,7 @@ func (r *cppBinary) NinjaEdge(m *parser.Module) string {
 	}
 	out := r.Outputs(m)[0]
 	allInputs := append(objFiles, libFiles...)
-	edges.WriteString(fmt.Sprintf("build %s: cpp_link %s\n flags = %s\n", out, strings.Join(allInputs, " "), ldflags))
+	edges.WriteString(fmt.Sprintf("build %s: cpp_link %s\n flags = %s\n", out, strings.Join(allInputs, " "), linkFlags))
 	return edges.String()
 }
 

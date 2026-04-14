@@ -223,7 +223,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if absBuildDir != absSourceDir {
 		relPath, err := filepath.Rel(absBuildDir, absSourceDir)
 		if err == nil && relPath != "." {
-			prefix = relPath + "/"
+			prefix = filepath.ToSlash(relPath) + "/"
 		}
 	}
 
