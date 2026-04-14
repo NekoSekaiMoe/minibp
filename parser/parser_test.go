@@ -419,6 +419,24 @@ func TestParseStringEscapes(t *testing.T) {
 	}
 }
 
+func TestParseRawString(t *testing.T) {
+	input := "cc_binary {\n    name: `hello\\nworld`,\n    srcs: [\"main.c\"],\n}"
+
+	p := NewParser(strings.NewReader(input), "test.bp")
+	file, errs := p.Parse()
+
+	if len(errs) > 0 {
+		t.Fatalf("Parse errors: %v", errs)
+	}
+
+	module := file.Defs[0].(*Module)
+	prop := findProperty(module.Map, "name")
+	str := prop.Value.(*String)
+	if str.Value != "hello\\nworld" {
+		t.Errorf("Expected raw string value 'hello\\\\nworld', got %q", str.Value)
+	}
+}
+
 func TestParseListTrailingComma(t *testing.T) {
 	input := `my_list = ["a", "b",]`
 

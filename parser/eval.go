@@ -2,8 +2,11 @@ package parser
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
+
+var interpolationPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
 type Evaluator struct {
 	vars   map[string]interface{}
@@ -62,7 +65,7 @@ func (e *Evaluator) ProcessAssignmentsFromDefs(defs []Definition) {
 func (e *Evaluator) Eval(expr Expression) interface{} {
 	switch v := expr.(type) {
 	case *String:
-		return v.Value
+		return e.interpolateString(v.Value)
 	case *Int64:
 		return v.Value
 	case *Bool:
@@ -120,6 +123,25 @@ func toString(v interface{}) (string, bool) {
 	default:
 		return fmt.Sprintf("%v", v), true
 	}
+}
+
+func (e *Evaluator) interpolateString(s string) string {
+	if !strings.Contains(s, "${") {
+		return s
+	}
+
+	return interpolationPattern.ReplaceAllStringFunc(s, func(match string) string {
+		parts := interpolationPattern.FindStringSubmatch(match)
+		if len(parts) != 2 {
+			return match
+		}
+		name := parts[1]
+		val, ok := e.vars[name]
+		if !ok {
+			return match
+		}
+		return fmt.Sprintf("%v", val)
+	})
 }
 
 func (e *Evaluator) evalSelect(s *Select) interface{} {

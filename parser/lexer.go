@@ -56,8 +56,8 @@ func NewLexer(r io.Reader) *Lexer {
 	l.scanner.Error = func(s *scanner.Scanner, msg string) {
 		// We'll handle errors ourselves
 	}
-	// Allow scanning raw strings and comments
-	l.scanner.Mode = scanner.ScanIdents | scanner.ScanInts | scanner.ScanStrings | scanner.ScanComments
+	// Allow scanning strings (quoted and raw) and comments.
+	l.scanner.Mode = scanner.ScanIdents | scanner.ScanInts | scanner.ScanStrings | scanner.ScanRawStrings | scanner.ScanComments
 	l.scanner.Whitespace = 1<<' ' | 1<<'\t' | 1<<'\n' | 1<<'\r'
 	l.next()
 	return l
@@ -136,7 +136,7 @@ func (l *Lexer) NextToken() Token {
 		tok.Type = INT
 		tok.Literal = l.scanner.TokenText()
 		l.next()
-	case scanner.String:
+	case scanner.String, scanner.RawString:
 		tok.Type = STRING
 		tok.Literal = l.scanner.TokenText()
 		l.next()

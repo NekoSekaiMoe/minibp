@@ -205,6 +205,66 @@ cc_library {
 	}
 }
 
+func TestEvaluatorStringInterpolationInAssignment(t *testing.T) {
+	input := `
+base = "lib"
+full = "${base}_static"`
+
+	p := NewParser(strings.NewReader(input), "test.bp")
+	file, errs := p.Parse()
+	if len(errs) > 0 {
+		t.Fatalf("Parse errors: %v", errs)
+	}
+
+	eval := NewEvaluator()
+	eval.ProcessAssignments(file)
+
+	val, ok := eval.vars["full"].(string)
+	if !ok {
+		t.Fatalf("Expected string, got %T", eval.vars["full"])
+	}
+	if val != "lib_static" {
+		t.Fatalf("Expected 'lib_static', got %q", val)
+	}
+}
+
+func TestEvaluatorStringInterpolationInModuleProp(t *testing.T) {
+	input := `
+suffix = "world"
+cc_binary {
+    name: "hello_${suffix}",
+    srcs: ["main.c"],
+}`
+
+	p := NewParser(strings.NewReader(input), "test.bp")
+	file, errs := p.Parse()
+	if len(errs) > 0 {
+		t.Fatalf("Parse errors: %v", errs)
+	}
+
+	eval := NewEvaluator()
+	eval.ProcessAssignments(file)
+
+	mod := file.Defs[1].(*Module)
+	name := EvalToString(findProp(mod.Map, "name").Value, eval)
+	if name != "hello_world" {
+		t.Fatalf("Expected 'hello_world', got %q", name)
+	}
+}
+
+func TestEvaluatorStringInterpolationUnknownVarPreserved(t *testing.T) {
+	eval := NewEvaluator()
+	got := eval.Eval(&String{Value: "pre_${missing}_post"})
+
+	s, ok := got.(string)
+	if !ok {
+		t.Fatalf("Expected string, got %T", got)
+	}
+	if s != "pre_${missing}_post" {
+		t.Fatalf("Expected unknown interpolation to be preserved, got %q", s)
+	}
+}
+
 func TestParseHostBlock(t *testing.T) {
 	input := `cc_library {
     name: "libfoo",
