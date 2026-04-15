@@ -125,4 +125,14 @@ custom {
     outs: ["test_result.txt"],
 }
 
+custom {
+    name: "format",
+    cmd: "go fmt",
+    srcs: [
+        "**/*.go",
+    ],
+    exclude_dirs: ["examples"],
+    outs: ["test.txt"],
+}
+
 // Note: Use './minibp -o build.ninja Android.bp' to regenerate build.ninja
