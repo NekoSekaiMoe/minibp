@@ -56,6 +56,12 @@ go_library {
         "ninja/gen.go",
         "ninja/rules.go",
         "ninja/writer.go",
+        "ninja/cc.go",
+        "ninja/go.go",
+        "ninja/java.go",
+        "ninja/filegroup.go",
+        "ninja/custom.go",
+        "ninja/defaults.go",
     ],
     deps: [
         ":libparser",

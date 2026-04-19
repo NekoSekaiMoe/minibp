@@ -1,6 +1,6 @@
 ## Before contributing
 
-This guideline explains how to contribute to Manboster. You **MUST** read this before writing or refactoring any code.
+This guideline explains how to contribute to minibp. You **MUST** read this before writing or refactoring any code.
 
 When contributing to this project (via `git push` or Pull Request), these guidelines apply, and you are held responsible for the code you commit.
 
