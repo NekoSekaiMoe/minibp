@@ -3,6 +3,7 @@ package parser
 import (
 	"strings"
 	"testing"
+	"text/scanner"
 )
 
 // TestEvaluatorVariableResolution tests that variable references are correctly
@@ -371,6 +372,17 @@ srcs += "b.c"`
 	}
 }
 
+// TestEvaluatorUndefinedVariableReturnsNil tests that undefined variables
+// return nil instead of their name as a string, preventing type confusion.
+func TestEvaluatorUndefinedVariableReturnsNil(t *testing.T) {
+	eval := NewEvaluator()
+	// Reference an undefined variable
+	result := eval.Eval(&Variable{Name: "undefined_var", NamePos: scanner.Position{}})
+	if result != nil {
+		t.Fatalf("Expected nil for undefined variable, got %v", result)
+	}
+}
+
 // TestEvaluatorMixedAdditionUnsupported tests that mixing incompatible types
 // in addition (e.g., int + string) returns nil rather than panicking or producing
 // incorrect results.
@@ -378,6 +390,22 @@ func TestEvaluatorMixedAdditionUnsupported(t *testing.T) {
 	got := evalOperator(int64(1), "x", '+')
 	if got != nil {
 		t.Fatalf("Expected nil for unsupported mixed addition, got %v", got)
+	}
+}
+
+// TestEvaluatorSubtractionOperator tests the - operator for integer subtraction.
+func TestEvaluatorSubtractionOperator(t *testing.T) {
+	got := evalOperator(int64(5), int64(3), '-')
+	if got != int64(2) {
+		t.Fatalf("Expected 2 for 5-3, got %v", got)
+	}
+}
+
+// TestEvaluatorMultiplicationOperator tests the * operator for integer multiplication.
+func TestEvaluatorMultiplicationOperator(t *testing.T) {
+	got := evalOperator(int64(4), int64(3), '*')
+	if got != int64(12) {
+		t.Fatalf("Expected 12 for 4*3, got %v", got)
 	}
 }
 

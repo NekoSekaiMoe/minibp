@@ -306,49 +306,105 @@ func run(args []string, stdout, stderr io.Writer) error {
 }
 
 // parseDefinitionsFromFiles parses a list of Blueprint files and returns all definitions.
+
 // Each file is opened, parsed, and its definitions are collected into a single slice.
+
 // The function handles file closing properly even if parsing fails.
+
 func parseDefinitionsFromFiles(files []string) ([]parser.Definition, error) {
+
 	var allDefs []parser.Definition
+
+	var parseErrors []string
+
 	for _, file := range files {
+
 		f, err := openInputFile(file)
+
 		if err != nil {
+
 			return nil, fmt.Errorf("error opening %s: %w", file, err)
+
 		}
 
 		parsedFile, parseErr := parseBlueprintFile(f, file)
+
 		closeErr := f.Close()
+
 		if parseErr != nil {
-			return nil, fmt.Errorf("parse error: %w", parseErr)
+
+			parseErrors = append(parseErrors, fmt.Sprintf("parse error in %s: %v", file, parseErr))
+
+			// Continue to next file to collect all errors
+
+			continue
+
 		}
+
 		if closeErr != nil {
+
 			return nil, fmt.Errorf("error closing %s: %w", file, closeErr)
+
 		}
 
 		allDefs = append(allDefs, parsedFile.Defs...)
+
+	}
+
+	// Return all collected errors if any
+
+	if len(parseErrors) > 0 {
+
+		return nil, fmt.Errorf("parsing failed: %s", strings.Join(parseErrors, "; "))
+
 	}
 
 	return allDefs, nil
+
 }
 
 // generateNinjaFile creates an output file and generates a Ninja build file into it.
+
 // It handles proper file closing both on success and on generation errors.
+
 func generateNinjaFile(path string, gen interface{ Generate(io.Writer) error }) error {
+
 	out, err := createOutputFile(path)
+
 	if err != nil {
+
 		return fmt.Errorf("error creating output: %w", err)
+
 	}
 
 	genErr := gen.Generate(out)
+
 	closeErr := out.Close()
+
 	if genErr != nil {
+
+		// Clean up incomplete file on error
+
+		closeErr = os.Remove(path)
+
+		if closeErr != nil {
+
+			return fmt.Errorf("error generating ninja: %w; error removing incomplete file: %v", genErr, closeErr)
+
+		}
+
 		return fmt.Errorf("error generating ninja: %w", genErr)
+
 	}
+
 	if closeErr != nil {
+
 		return fmt.Errorf("error closing output: %w", closeErr)
+
 	}
 
 	return nil
+
 }
 
 // getStringProp retrieves a string property from a module using the ninja helper.
@@ -444,7 +500,8 @@ func mergeMapProps(m *parser.Module, override *parser.Map) {
 			found := false
 			for i, baseProp := range m.Map.Properties {
 				if baseProp.Name == prop.Name {
-					m.Map.Properties[i] = prop
+					// Keep the original property position info, only update the value
+					m.Map.Properties[i].Value = prop.Value
 					found = true
 					break
 				}

@@ -148,8 +148,8 @@ func (e *Evaluator) Eval(expr Expression) interface{} {
 		if val, ok := e.vars[v.Name]; ok {
 			return val
 		}
-		// Undefined variable returns its name as a string
-		return v.Name
+		// Undefined variable returns nil (will be handled by caller)
+		return nil
 	case *Operator:
 		// Binary operator - evaluate both operands and apply operator
 		left := e.Eval(v.Args[0])
@@ -176,7 +176,8 @@ func (e *Evaluator) Eval(expr Expression) interface{} {
 // Returns:
 //   - interface{}: Result of the operation, or nil if unsupported
 func evalOperator(left, right interface{}, op rune) interface{} {
-	if op == '+' {
+	switch op {
+	case '+':
 		// Try integer addition first
 		li, lok := left.(int64)
 		ri, rok := right.(int64)
@@ -188,6 +189,20 @@ func evalOperator(left, right interface{}, op rune) interface{} {
 		rs, rok := right.(string)
 		if lok && rok {
 			return ls + rs
+		}
+	case '-':
+		// Integer subtraction
+		li, lok := left.(int64)
+		ri, rok := right.(int64)
+		if lok && rok {
+			return li - ri
+		}
+	case '*':
+		// Integer multiplication
+		li, lok := left.(int64)
+		ri, rok := right.(int64)
+		if lok && rok {
+			return li * ri
 		}
 	}
 	return nil

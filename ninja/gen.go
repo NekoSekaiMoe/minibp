@@ -123,29 +123,50 @@ func (g *Generator) getRelativePath(file string) string {
 	if g.sourceDir == g.outputDir {
 		return file
 	}
-	absSource, _ := filepath.Abs(g.sourceDir)
-	absOutput, _ := filepath.Abs(g.outputDir)
+	absSource, err := filepath.Abs(g.sourceDir)
+	if err != nil {
+		// Fallback: use original path if absolute conversion fails
+		return file
+	}
+	absOutput, err := filepath.Abs(g.outputDir)
+	if err != nil {
+		// Fallback: use original path if absolute conversion fails
+		return file
+	}
 	if rel, err := filepath.Rel(absOutput, absSource); err == nil {
 		if rel == "." {
 			return file
 		}
 		return filepath.Join(rel, file)
 	}
+	// Fallback: use original path if relative path calculation fails
 	return file
 }
 
 // collectIncludePaths recursively collects export_include_dirs from a module and its dependencies.
+
 // These directories are added to the compiler's include path (-I flags).
+
 // It traverses cc_library_headers, header_libs, shared_libs, and deps to find all exported headers.
+
 func (g *Generator) collectIncludePaths(moduleName string, visited map[string]bool) []string {
+
 	if visited[moduleName] {
+
 		return nil
+
 	}
+
 	visited[moduleName] = true
 
 	m, ok := g.modules[moduleName]
+
 	if !ok || m == nil {
-		return nil
+
+		// Module doesn't exist or is nil - return empty slice not nil
+
+		return []string{}
+
 	}
 
 	var includes []string
@@ -311,23 +332,23 @@ func (g *Generator) Generate(w io.Writer) error {
 				}
 			}
 
-					sourceDir := g.sourceDir
+			sourceDir := g.sourceDir
 
-					if sourceDir == "." {
+			if sourceDir == "." {
 
-						absPath, _ := filepath.Abs(g.sourceDir)
+				absPath, _ := filepath.Abs(g.sourceDir)
 
-						sourceDir = filepath.Base(absPath)
+				sourceDir = filepath.Base(absPath)
 
-					}
+			}
 
-					edgeDef := rule.NinjaEdge(m, ctx)
+			edgeDef := rule.NinjaEdge(m, ctx)
 
-					if edgeDef == "" && m.Type != "cc_library_headers" {
+			if edgeDef == "" && m.Type != "cc_library_headers" {
 
-						continue
+				continue
 
-					}
+			}
 
 			if edgeDef != "" {
 				if strings.HasPrefix(m.Type, "java_") {

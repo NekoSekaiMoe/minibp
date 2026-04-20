@@ -67,23 +67,43 @@ func registrySnapshot() map[string]Factory {
 }
 
 // restoreRegistry replaces the current registry with a snapshot.
+
 // This is used in tests to restore the registry to a previous state.
+
 // Parameters:
-//   - snapshot: A map of module type names to factories
+
+// - snapshot: A map of module type names to factories
+
 func restoreRegistry(snapshot map[string]Factory) {
+
 	registryMu.Lock()
+
 	defer registryMu.Unlock()
 
-	registry = make(map[string]Factory, len(snapshot))
-	for name, factory := range snapshot {
-		registry[name] = factory
+	if snapshot == nil {
+
+		registry = make(map[string]Factory)
+
+		return
+
 	}
+
+	registry = make(map[string]Factory, len(snapshot))
+
+	for name, factory := range snapshot {
+
+		registry[name] = factory
+
+	}
+
 }
 
 // resetRegistry clears all registered factories from the registry.
 // This is used in tests to start with a clean registry state.
 func resetRegistry() {
-	restoreRegistry(nil)
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	registry = make(map[string]Factory)
 }
 
 // registryLen returns the number of registered module types.

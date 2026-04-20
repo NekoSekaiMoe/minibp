@@ -183,7 +183,16 @@ func (g *Graph) TopoSort() ([][]string, error) {
 					remaining = append(remaining, name)
 				}
 			}
-			return nil, fmt.Errorf("cycle detected in dependency graph, remaining nodes: %v", remaining)
+			// Build cycle description with dependency information
+			cycleInfo := fmt.Sprintf("cycle detected in dependency graph involving modules: %v", remaining)
+			// Add dependency chain information
+			for _, name := range remaining {
+				deps := g.GetDeps(name)
+				if len(deps) > 0 {
+					cycleInfo += fmt.Sprintf("; %s depends on %v", name, deps)
+				}
+			}
+			return nil, fmt.Errorf("%s", cycleInfo)
 		}
 
 		// Sort level for deterministic output

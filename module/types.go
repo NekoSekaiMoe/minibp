@@ -9,38 +9,71 @@ import (
 )
 
 // extractStringList extracts a list of string values from an AST map property.
+
 // It handles both literal string values and expressions that can be evaluated.
+
 // Parameters:
-//   - ast: The parser.Map containing the module properties
-//   - key: The property name to extract
-//   - eval: Optional evaluator for computing expression values
+
+// - ast: The parser.Map containing the module properties
+
+// - key: The property name to extract
+
+// - eval: Optional evaluator for computing expression values
+
 //
+
 // Returns:
+
 //
-//	A slice of strings, or nil if the property doesn't exist or isn't a list
+
+//	A slice of strings, or an empty slice if the property doesn't exist or isn't a list
+
 func extractStringList(ast *parser.Map, key string, eval *parser.Evaluator) []string {
+
 	if ast == nil {
-		return nil
+
+		return []string{}
+
 	}
+
 	for _, prop := range ast.Properties {
+
 		if prop.Name == key {
+
 			if list, ok := prop.Value.(*parser.List); ok {
+
 				result := make([]string, 0, len(list.Values))
+
 				for _, v := range list.Values {
+
 					if s, ok := v.(*parser.String); ok {
+
 						result = append(result, s.Value)
+
 					} else if eval != nil {
+
 						val := eval.Eval(v)
+
 						if s, ok := val.(string); ok {
+
 							result = append(result, s)
+
 						}
+
 					}
+
 				}
+
 				return result
+
 			}
+
 		}
+
 	}
-	return nil
+
+	return []string{}
+
 }
 
 // extractString extracts a single string value from an AST map property.

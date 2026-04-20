@@ -186,6 +186,8 @@ func (l *Lexer) NextToken() Token {
 		} else {
 			tok.Type = ILLEGAL
 			tok.Literal = string(l.ch)
+			// Record error for illegal characters
+			l.errors = append(l.errors, fmt.Errorf("%s: illegal character '%c'", l.scanner.Position, l.ch))
 			l.next()
 		}
 	}

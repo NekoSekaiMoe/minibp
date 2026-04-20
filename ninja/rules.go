@@ -84,10 +84,10 @@ func GetRule(name string) BuildRule {
 			return r
 		}
 	}
-		return nil
-	}
-	
-	// GetStringProp retrieves a string property value from a module.
+	return nil
+}
+
+// GetStringProp retrieves a string property value from a module.
 
 func GetStringProp(m *parser.Module, name string) string {
 

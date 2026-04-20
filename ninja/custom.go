@@ -58,8 +58,6 @@ func (r *customRule) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	out := outs[0]
 
-	
-
 	// Replace $out and $in with actual paths in command
 
 	inStr := strings.Join(srcs, " ")
@@ -67,8 +65,6 @@ func (r *customRule) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	actualCommand := strings.ReplaceAll(command, "$out", out)
 
 	actualCommand = strings.ReplaceAll(actualCommand, "$in", inStr)
-
-	
 
 	// Escape paths for ninja build file
 
@@ -83,8 +79,6 @@ func (r *customRule) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 		escapedSrcs[i] = ninjaEscapePath(src)
 
 	}
-
-	
 
 	var edges strings.Builder
 

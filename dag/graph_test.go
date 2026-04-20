@@ -252,32 +252,153 @@ func TestTopoSortLinearChain(t *testing.T) {
 }
 
 // TestTopoSortIndependentModules verifies that modules with no dependencies
+
 // are all placed at level 0 and sorted alphabetically. This tests the case
+
 // where the graph contains only independent modules with no edges between them.
+
 func TestTopoSortIndependentModules(t *testing.T) {
+
 	g := NewGraph()
 
 	// A, B, C have no dependencies
+
 	g.AddModule(&MockModule{name: "A"})
+
 	g.AddModule(&MockModule{name: "B"})
+
 	g.AddModule(&MockModule{name: "C"})
 
 	levels, err := g.TopoSort()
+
 	if err != nil {
+
 		t.Fatalf("Unexpected error: %v", err)
+
 	}
 
 	// All should be at level 0 (sorted alphabetically)
+
 	if len(levels) != 1 {
+
 		t.Fatalf("Expected 1 level, got %d", len(levels))
+
 	}
 
 	if len(levels[0]) != 3 {
+
 		t.Errorf("Expected 3 modules at level 0, got %v", levels[0])
+
 	}
 
 	want := []string{"A", "B", "C"}
+
 	if !reflect.DeepEqual(levels[0], want) {
+
 		t.Fatalf("Expected sorted level %v, got %v", want, levels[0])
+
 	}
+
+}
+
+// TestCycleDetectionErrorMessage verifies that cycle detection error message
+
+// includes the remaining nodes in the cycle for better debugging.
+
+func TestCycleDetectionErrorMessage(t *testing.T) {
+
+	g := NewGraph()
+
+	g.AddModule(&MockModule{name: "A"})
+
+	g.AddModule(&MockModule{name: "B"})
+
+	g.AddModule(&MockModule{name: "C"})
+
+	// Create a cycle: A -> B -> C -> A
+
+	g.AddEdge("A", "B")
+
+	g.AddEdge("B", "C")
+
+	g.AddEdge("C", "A")
+
+	_, err := g.TopoSort()
+
+	if err == nil {
+
+		t.Fatal("Expected cycle detection error")
+
+	}
+
+	// Error message should mention remaining nodes
+
+	errMsg := err.Error()
+
+	// Check that error message contains all module names in the cycle
+
+	hasA := false
+
+	hasB := false
+
+	hasC := false
+
+	for _, ch := range errMsg {
+
+		if ch == 'A' {
+
+			hasA = true
+
+		}
+
+		if ch == 'B' {
+
+			hasB = true
+
+		}
+
+		if ch == 'C' {
+
+			hasC = true
+
+		}
+
+	}
+
+	if !hasA || !hasB || !hasC {
+
+		t.Errorf("Error message should mention cycle nodes A, B, C, got: %s", errMsg)
+
+	}
+
+	// Check that error message mentions "cycle"
+
+	hasCycle := false
+
+	for i := 0; i < len(errMsg)-4; i++ {
+
+		if errMsg[i:i+5] == "cycle" {
+
+			hasCycle = true
+
+			break
+
+		}
+
+	}
+
+	if !hasCycle {
+
+		t.Errorf("Error message should mention 'cycle', got: %s", errMsg)
+
+	}
+
+}
+
+// contains is a helper function to check if a string contains a substring
+
+func contains(s, substr string) bool {
+
+	return len(s) > 0 && len(substr) > 0 && (s[0] == substr[0] || s[len(s)-1] == substr[0])
+
 }
