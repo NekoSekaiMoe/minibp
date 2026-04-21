@@ -4,14 +4,23 @@ package main
 
 import (
 	"flag"
+
 	"fmt"
+
 	"io"
+
 	"os"
+
 	"path/filepath"
+
 	"sort"
+
 	"strings"
 
+	"minibp/internal/version"
+
 	"minibp/ninja"
+
 	"minibp/parser"
 )
 
@@ -136,22 +145,49 @@ func main() {
 }
 
 // run is the main logic function that processes command-line arguments and generates the build file.
+
 // It handles flag parsing, Blueprint file loading, dependency resolution, variant merging, and Ninja file generation.
+
 func run(args []string, stdout, stderr io.Writer) error {
+
 	var (
-		fs       = flag.NewFlagSet("minibp", flag.ContinueOnError)
-		outFile  = fs.String("o", "build.ninja", "output ninja file")
-		all      = fs.Bool("a", false, "parse all .bp files in directory")
-		ccFlag   = fs.String("cc", "", "C compiler (default: gcc)")
-		cxxFlag  = fs.String("cxx", "", "C++ compiler (default: g++)")
-		arFlag   = fs.String("ar", "", "archiver (default: ar)")
+		fs = flag.NewFlagSet("minibp", flag.ContinueOnError)
+
+		outFile = fs.String("o", "build.ninja", "output ninja file")
+
+		all = fs.Bool("a", false, "parse all .bp files in directory")
+
+		ccFlag = fs.String("cc", "", "C compiler (default: gcc)")
+
+		cxxFlag = fs.String("cxx", "", "C++ compiler (default: g++)")
+
+		arFlag = fs.String("ar", "", "archiver (default: ar)")
+
 		archFlag = fs.String("arch", "", "target architecture (arm, arm64, x86, x86_64)")
+
 		hostFlag = fs.Bool("host", false, "build for host (overrides arch)")
-		osFlag   = fs.String("os", "", "target OS (linux, darwin, windows)")
+
+		osFlag = fs.String("os", "", "target OS (linux, darwin, windows)")
+
+		versionFlag = fs.Bool("v", false, "show version information")
 	)
+
 	fs.SetOutput(stderr)
+
 	if err := fs.Parse(args); err != nil {
+
 		return err
+
+	}
+
+	// Show version if requested
+
+	if *versionFlag {
+
+		fmt.Fprintf(stdout, "minibp version %s\n", getVersion())
+
+		return nil
+
 	}
 
 	// Validate that we have input files
@@ -360,6 +396,16 @@ func parseDefinitionsFromFiles(files []string) ([]parser.Definition, error) {
 	}
 
 	return allDefs, nil
+
+}
+
+// getVersion returns the version information as a formatted string.
+
+func getVersion() string {
+
+	v := version.Get()
+
+	return fmt.Sprintf("%s (git: %s, built: %s, go: %s)", v.MinibpVer, v.GitCommit, v.BuildDate, v.GoVersion)
 
 }
 
