@@ -46,10 +46,7 @@ func GetAllRules() []BuildRule {
 		&ccLibraryShared{},
 		&ccObject{},
 		&ccBinary{},
-		&cppLibrary{},
-		&cppBinary{},
 		&ccLibraryHeaders{},
-
 		// Go rules
 		&goLibrary{},
 		&goBinary{},
@@ -282,8 +279,6 @@ func getGoflags(m *parser.Module) string {
 	return strings.Join(GetListProp(m, "goflags"), " ")
 
 }
-
-
 
 // getJavaflags retrieves Java compiler flags from a module.
 

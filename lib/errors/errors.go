@@ -11,16 +11,16 @@ import (
 type ErrorCategory int
 
 const (
-	Uncategorized ErrorCategory = iota
-	SyntaxError                // Syntax error
-	DependencyError            // Dependency error
-	ConfigurationError         // Configuration error
-	FileNotFoundError          // File not found error
-	CircularDependency         // Circular dependency error
-	DuplicateDefinition      // Duplicate definition error
-	TypeMismatch             // Type mismatch error
-	MissingProperty          // Missing property error
-	InvalidValue             // Invalid value error
+	Uncategorized       ErrorCategory = iota
+	SyntaxError                       // Syntax error
+	DependencyError                   // Dependency error
+	ConfigurationError                // Configuration error
+	FileNotFoundError                 // File not found error
+	CircularDependency                // Circular dependency error
+	DuplicateDefinition               // Duplicate definition error
+	TypeMismatch                      // Type mismatch error
+	MissingProperty                   // Missing property error
+	InvalidValue                      // Invalid value error
 )
 
 func (c ErrorCategory) String() string {
@@ -87,13 +87,13 @@ type ErrorContext struct {
 
 // BuildError represents a structured build error
 type BuildError struct {
-	Category    ErrorCategory
-	Severity    ErrorSeverity
-	Message     string
-	Location    *Location
-	Context     *ErrorContext
-	Suggestion  string // Suggestion for fixing
-	Cause       error  // Underlying cause
+	Category   ErrorCategory
+	Severity   ErrorSeverity
+	Message    string
+	Location   *Location
+	Context    *ErrorContext
+	Suggestion string // Suggestion for fixing
+	Cause      error  // Underlying cause
 }
 
 // NewError creates a new BuildError

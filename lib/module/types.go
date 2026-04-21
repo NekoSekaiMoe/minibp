@@ -317,17 +317,15 @@ func (f *CCBinaryFactory) Create(ast *parser.Module, eval *parser.Evaluator) (Mo
 // - LDFlags: Go linker flags (e.g., "-ldflags")
 
 type GoLibrary struct {
-
 	BaseModule
 
 	PackagePath string
 
-	ImportPath  string
+	ImportPath string
 
-	GoFlags     []string
+	GoFlags []string
 
-	LDFlags     []string
-
+	LDFlags []string
 }
 
 // GoLibraryFactory creates GoLibrary instances from AST nodes.
@@ -354,16 +352,15 @@ func (f *GoLibraryFactory) Create(ast *parser.Module, eval *parser.Evaluator) (M
 
 	m := &GoLibrary{
 
-		BaseModule:  baseModuleFromAST(ast, eval),
+		BaseModule: baseModuleFromAST(ast, eval),
 
 		PackagePath: extractString(ast.Map, "pkg", eval),
 
-		ImportPath:  extractString(ast.Map, "importpath", eval),
+		ImportPath: extractString(ast.Map, "importpath", eval),
 
-		GoFlags:     extractStringList(ast.Map, "goflags", eval),
+		GoFlags: extractStringList(ast.Map, "goflags", eval),
 
-		LDFlags:     extractStringList(ast.Map, "ldflags", eval),
-
+		LDFlags: extractStringList(ast.Map, "ldflags", eval),
 	}
 
 	return m, nil
@@ -387,17 +384,15 @@ func (f *GoLibraryFactory) Create(ast *parser.Module, eval *parser.Evaluator) (M
 // - LDFlags: Go linker flags (e.g., "-ldflags")
 
 type GoBinary struct {
-
 	BaseModule
 
 	PackagePath string
 
-	ImportPath  string
+	ImportPath string
 
-	GoFlags     []string
+	GoFlags []string
 
-	LDFlags     []string
-
+	LDFlags []string
 }
 
 // GoBinaryFactory creates GoBinary instances from AST nodes.
@@ -424,16 +419,15 @@ func (f *GoBinaryFactory) Create(ast *parser.Module, eval *parser.Evaluator) (Mo
 
 	m := &GoBinary{
 
-		BaseModule:  baseModuleFromAST(ast, eval),
+		BaseModule: baseModuleFromAST(ast, eval),
 
 		PackagePath: extractString(ast.Map, "pkg", eval),
 
-		ImportPath:  extractString(ast.Map, "importpath", eval),
+		ImportPath: extractString(ast.Map, "importpath", eval),
 
-		GoFlags:     extractStringList(ast.Map, "goflags", eval),
+		GoFlags: extractStringList(ast.Map, "goflags", eval),
 
-		LDFlags:     extractStringList(ast.Map, "ldflags", eval),
-
+		LDFlags: extractStringList(ast.Map, "ldflags", eval),
 	}
 
 	return m, nil

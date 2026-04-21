@@ -663,23 +663,6 @@ func TestProtoLibraryWithPlugins(t *testing.T) {
 	}
 }
 
-func TestDepfileInCppRules(t *testing.T) {
-	r := &cppLibrary{}
-	rule := r.NinjaRule(DefaultRuleRenderContext())
-	if !strings.Contains(rule, "depfile = $out.d") {
-		t.Errorf("Expected depfile in cpp_compile rule, got: %s", rule)
-	}
-	if !strings.Contains(rule, "deps = gcc") {
-		t.Errorf("Expected deps = gcc in cpp_compile rule, got: %s", rule)
-	}
-
-	r2 := &cppBinary{}
-	rule2 := r2.NinjaRule(DefaultRuleRenderContext())
-	if !strings.Contains(rule2, "depfile = $out.d") {
-		t.Errorf("Expected depfile in cpp_binary compile rule, got: %s", rule2)
-	}
-}
-
 func TestCCSharedLibraryIncludesSharedDeps(t *testing.T) {
 	r := &ccLibrary{}
 	m := &parser.Module{
@@ -694,27 +677,6 @@ func TestCCSharedLibraryIncludesSharedDeps(t *testing.T) {
 
 	edge := r.NinjaEdge(m, DefaultRuleRenderContext())
 	if !strings.Contains(edge, "build libapp.so: cc_shared app_app.o libbase.so") {
-		t.Fatalf("Expected shared library input dependency in edge, got: %s", edge)
-	}
-	if !strings.Contains(edge, "-lbase") {
-		t.Fatalf("Expected linker flag for shared dep, got: %s", edge)
-	}
-}
-
-func TestCppSharedLibraryIncludesSharedDeps(t *testing.T) {
-	r := &cppLibrary{}
-	m := &parser.Module{
-		Type: "cpp_library",
-		Map: &parser.Map{Properties: []*parser.Property{
-			{Name: "name", Value: &parser.String{Value: "app"}},
-			{Name: "shared", Value: &parser.Bool{Value: true}},
-			{Name: "srcs", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: "app.cpp"}}}},
-			{Name: "shared_libs", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: ":base"}}}},
-		}},
-	}
-
-	edge := r.NinjaEdge(m, DefaultRuleRenderContext())
-	if !strings.Contains(edge, "build libapp.so: cpp_shared app_app.o libbase.so") {
 		t.Fatalf("Expected shared library input dependency in edge, got: %s", edge)
 	}
 	if !strings.Contains(edge, "-lbase") {
@@ -882,7 +844,7 @@ func TestGeneratorAppliesToolchainFlagsToCAndCppEdges(t *testing.T) {
 		}},
 	}
 	cppModule := &parser.Module{
-		Type: "cpp_binary",
+		Type: "cc_binary",
 		Map: &parser.Map{Properties: []*parser.Property{
 			{Name: "name", Value: &parser.String{Value: "cppapp"}},
 			{Name: "srcs", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: "app.cpp"}}}},
@@ -891,10 +853,12 @@ func TestGeneratorAppliesToolchainFlagsToCAndCppEdges(t *testing.T) {
 			{Name: "ldflags", Value: &parser.List{Values: []parser.Expression{&parser.String{Value: "-Wl,--as-needed"}}}},
 		}},
 	}
-
 	rules := map[string]BuildRule{
 		"cc_binary":  &ccBinary{},
-		"cpp_binary": &cppBinary{},
+		"cc_library": &ccLibrary{},
+		"cc_object":  &ccObject{},
+		"cc_archive": &ccLibraryStatic{},
+		"cc_link":    &ccBinary{},
 	}
 	modules := map[string]*parser.Module{
 		"capp":   ccModule,
@@ -928,14 +892,22 @@ func TestGeneratorAppliesToolchainFlagsToCAndCppEdges(t *testing.T) {
 	if strings.Contains(output, "build capp: cc_link capp_app.o\n flags = -DGLOBAL") {
 		t.Fatalf("Expected cc compile flags to be excluded from link edge, got: %s", output)
 	}
-	if !strings.Contains(output, "build cppapp_app.o: cpp_compile app.cpp\n flags = -DGLOBAL -fPIC -std=c++20") {
-		t.Fatalf("Expected cpp compile edge to include global cflags, module cflags, and cppflags, got: %s", output)
+	// Check that C files use gcc compiler
+	if !strings.Contains(output, "CC = gcc\nbuild capp:") {
+		t.Fatalf("Expected C binary to use gcc compiler, got: %s", output)
 	}
-	if !strings.Contains(output, "build cppapp: cpp_link cppapp_app.o\n flags = -Wl,--gc-sections -Wl,--as-needed") {
-		t.Fatalf("Expected cpp link edge to include global and module ldflags, got: %s", output)
+	// Check that C++ files use g++ compiler
+	if !strings.Contains(output, "CC = g++\nbuild cppapp:") {
+		t.Fatalf("Expected C++ binary to use g++ compiler, got: %s", output)
 	}
-	if strings.Contains(output, "build cppapp: cpp_link cppapp_app.o\n flags = -DGLOBAL") {
-		t.Fatalf("Expected cpp compile flags to be excluded from link edge, got: %s", output)
+	if !strings.Contains(output, "build cppapp_app.o: cc_compile app.cpp\n flags = -DGLOBAL -fPIC -std=c++20") {
+		t.Fatalf("Expected cc compile edge to include global cflags, module cflags, and cppflags, got: %s", output)
+	}
+	if !strings.Contains(output, "build cppapp: cc_link cppapp_app.o\n flags = -Wl,--gc-sections -Wl,--as-needed") {
+		t.Fatalf("Expected cc link edge to include global and module ldflags, got: %s", output)
+	}
+	if strings.Contains(output, "build cppapp: cc_link cppapp_app.o\n flags = -DGLOBAL") {
+		t.Fatalf("Expected cc compile flags to be excluded from link edge, got: %s", output)
 	}
 }
 

@@ -45,8 +45,6 @@ func (r *goLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	out := r.Outputs(m, ctx)[0]
 
-
-
 	// Build command with ldflags if present
 
 	var cmd string
@@ -60,8 +58,6 @@ func (r *goLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 		cmd = "go build -buildmode=archive -o $out $in"
 
 	}
-
-
 
 	return fmt.Sprintf("build %s: go_build_archive %s\n flags = %s\n cmd = %s\n", out, strings.Join(srcs, " "), goflags, cmd)
 
@@ -122,8 +118,6 @@ func (r *goBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	srcStr := strings.Join(srcs, " ")
 
-
-
 	// Build command with ldflags if present
 
 	var cmd string
@@ -137,8 +131,6 @@ func (r *goBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 		cmd = "go build -o $out $in"
 
 	}
-
-
 
 	if len(libFiles) > 0 {
 
@@ -197,8 +189,6 @@ func (r *goTest) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	pkgPath := "./" + filepath.Dir(srcs[0])
 
-
-
 	// Build command with ldflags if present
 
 	var cmd string
@@ -212,8 +202,6 @@ func (r *goTest) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 		cmd = "go test -c -o $out $pkg"
 
 	}
-
-
 
 	return fmt.Sprintf("build %s: go_test\n pkg = %s\n flags = %s\n cmd = %s\n", out, pkgPath, goflags, cmd)
 

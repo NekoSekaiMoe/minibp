@@ -1,6 +1,5 @@
 // Example Blueprint file for minibp
 // This demonstrates all 7 supported module types
-
 // ============================================================================
 // C/C++ Modules
 // ============================================================================
@@ -25,31 +24,95 @@ cc_library_headers {
     export_include_dirs: ["."],
 }
 
-// C++ static library
-cpp_library {
+// C++ static library (automatically detects C++ from .cpp extension)
+cc_library {
     name: "libcore",
     srcs: ["core.cpp", "utils.cpp"],
     cflags: ["-std=c++17", "-Wall"],
     header_libs: [":libcore-headers"],
 }
 
+// String utility library (C++)
+cc_library {
+    name: "libstrutil",
+    srcs: ["strutil.cpp"],
+    cflags: ["-std=c++17", "-Wall"],
+}
+
+// Math library (C)
+cc_library {
+    name: "libmath",
+    srcs: ["mathlib.c"],
+    cflags: ["-Wall", "-O2"],
+}
+
+// Array utility library (C++)
+cc_library {
+    name: "libarrayutil",
+    srcs: ["arrayutil.cpp"],
+    cflags: ["-std=c++17", "-Wall"],
+}
+
+// Logger library (C)
+cc_library {
+    name: "liblogger",
+    srcs: ["logger.c"],
+    cflags: ["-Wall"],
+}
+
 // C binary executable
 cc_binary {
     name: "hello",
     srcs: ["main.c"],
-    deps: [
-        ":libutil",
-    ],
+    deps: [":libutil"],
     cflags: ["-Wall", "-g"],
 }
 
-// C++ binary executable
-cpp_binary {
+// C++ binary executable (automatically uses g++ from .cpp extension)
+cc_binary {
     name: "app",
     srcs: ["main.cpp"],
-    deps: [
-        ":libcore",
-    ],
+    deps: [":libcore"],
+}
+
+// String utility test (C++)
+cc_binary {
+    name: "test_strutil",
+    srcs: ["test_strutil.cpp"],
+    deps: [":libstrutil"],
+}
+
+// Math library test (C)
+cc_binary {
+    name: "test_mathlib",
+    srcs: ["test_mathlib.c"],
+    deps: [":libmath"],
+}
+
+// Array utility test (C++)
+cc_binary {
+    name: "test_arrayutil",
+    srcs: ["test_arrayutil.cpp"],
+    deps: [":libarrayutil"],
+}
+
+// Logger test (C)
+cc_binary {
+    name: "test_logger",
+    srcs: ["test_logger.c"],
+    deps: [":liblogger"],
+}
+
+// Simple C demo
+cc_binary {
+    name: "demo_c",
+    srcs: ["demo.c"],
+}
+
+// Simple C++ demo
+cc_binary {
+    name: "demo_cpp",
+    srcs: ["demo.cpp"],
 }
 
 // ============================================================================

@@ -30,37 +30,27 @@ func detectCompilerType(srcs []string) string {
 
 type ccLibrary struct{}
 
-
-
 func (r *ccLibrary) Name() string {
 
 	return "cc_library"
 
 }
 
-
-
 func (r *ccLibrary) NinjaRule(ctx RuleRenderContext) string {
-
-
-
-	// Auto-detect compiler type - use CXX if any C++ files are present
-
-
 
 	return fmt.Sprintf(`rule cc_compile
 
 
 
- command = %s -c $in -o $out $flags -MMD -MF $out.d
+  command = ${CC} -c $in -o $out $flags -MMD -MF $out.d
 
 
 
- depfile = $out.d
+  depfile = $out.d
 
 
 
- deps = gcc
+  deps = gcc
 
 
 
@@ -68,7 +58,7 @@ rule cc_archive
 
 
 
- command = %s rcs $out $in
+  command = %s rcs $out $in
 
 
 
@@ -76,13 +66,11 @@ rule cc_shared
 
 
 
- command = %s -shared -o $out $in $flags
+  command = ${CC} -shared -o $out $in $flags
 
 
 
-`, ctx.CXX, ctx.AR, ctx.CXX)
-
-
+`, ctx.AR)
 
 }
 
@@ -110,31 +98,27 @@ func (r *ccLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	}
 
+	// Auto-detect compiler type and select compiler
 
+	compilerType := detectCompilerType(srcs)
 
-			// Auto-detect compiler type
+	compiler := ctx.CC
 
+	if compilerType == "cpp" {
 
+		compiler = ctx.CXX
 
-			_ = detectCompilerType(srcs) // Use result to select compiler flags if needed
+	}
 
+	compileRule := "cc_compile"
 
+	archiveRule := "cc_archive"
 
-			compileRule := "cc_compile"
-
-
-
-			archiveRule := "cc_archive"
-
-
-
-			sharedRule := "cc_shared"
-
-
+	sharedRule := "cc_shared"
 
 	shared := getBoolProp(m, "shared")
 
-	cflags := joinFlags(ctx.CFlags, getCflags(m))
+	cflags := joinFlags(ctx.CFlags, getCflags(m), getCppflags(m))
 
 	ldflags := joinFlags(ctx.LdFlags, getLdflags(m))
 
@@ -156,8 +140,6 @@ func (r *ccLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	}
 
-
-
 	var edges strings.Builder
 
 	var objFiles []string
@@ -168,7 +150,7 @@ func (r *ccLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 		objFiles = append(objFiles, obj)
 
-		edges.WriteString(fmt.Sprintf("build %s: %s %s\n flags = %s\n", obj, compileRule, src, cflags))
+		edges.WriteString(fmt.Sprintf("build %s: %s %s\n flags = %s\n CC = %s\n", obj, compileRule, src, cflags, compiler))
 
 	}
 
@@ -178,7 +160,7 @@ func (r *ccLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 		allInputs := append(objFiles, sharedInputs...)
 
-		edges.WriteString(fmt.Sprintf("build %s: %s %s\n flags = %s\n", out, sharedRule, strings.Join(allInputs, " "), ldflags))
+		edges.WriteString(fmt.Sprintf("build %s: %s %s\n flags = %s\n CC = %s\n", out, sharedRule, strings.Join(allInputs, " "), ldflags, compiler))
 
 	} else {
 
@@ -282,7 +264,7 @@ func (r *ccLibraryShared) NinjaEdge(m *parser.Module, ctx RuleRenderContext) str
 		return ""
 	}
 
-	cflags := joinFlags(ctx.CFlags, getCflags(m))
+	cflags := joinFlags(ctx.CFlags, getCflags(m), getCppflags(m))
 	ldflags := joinFlags(ctx.LdFlags, getLdflags(m))
 
 	var sharedInputs []string
@@ -392,198 +374,93 @@ func (r *ccBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 }
 
 func (r *ccBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
+
 	name := getName(m)
+
 	srcs := getSrcs(m)
+
 	deps := GetListProp(m, "deps")
+
 	sharedLibs := GetListProp(m, "shared_libs")
+
 	if name == "" || len(srcs) == 0 {
+
 		return ""
+
 	}
 
-	cflags := joinFlags(ctx.CFlags, getCflags(m))
+	// Auto-detect compiler type and select compiler
+
+	compilerType := detectCompilerType(srcs)
+
+	compiler := ctx.CC
+
+	if compilerType == "cpp" {
+
+		compiler = ctx.CXX
+
+	}
+
+	cflags := joinFlags(ctx.CFlags, getCflags(m), getCppflags(m))
+
 	ldflags := joinFlags(ctx.LdFlags, getLdflags(m))
+
 	linkFlags := ldflags
 
 	var libFiles []string
+
 	for _, dep := range deps {
+
 		depName := strings.TrimPrefix(dep, ":")
+
 		libFiles = append(libFiles, staticLibOutputName(depName, ctx.ArchSuffix))
+
 	}
+
 	for _, dep := range sharedLibs {
+
 		depName := strings.TrimPrefix(dep, ":")
+
 		libFiles = append(libFiles, sharedLibOutputName(depName, ctx.ArchSuffix))
+
 		linkFlags = joinFlags(linkFlags, "-l"+depName)
+
 	}
 
 	var edges strings.Builder
+
 	var objFiles []string
+
 	for _, src := range srcs {
+
 		obj := objectOutputName(name, src)
+
 		objFiles = append(objFiles, obj)
-		edges.WriteString(fmt.Sprintf("build %s: cc_compile %s\n flags = %s\n", obj, src, cflags))
+
+		edges.WriteString(fmt.Sprintf("build %s: cc_compile %s\n flags = %s\n CC = %s\n", obj, src, cflags, compiler))
+
 	}
 
 	out := r.Outputs(m, ctx)[0]
+
 	allInputs := append(objFiles, libFiles...)
-	edges.WriteString(fmt.Sprintf("build %s: cc_link %s\n flags = %s\n", out, strings.Join(allInputs, " "), linkFlags))
+
+	edges.WriteString(fmt.Sprintf("build %s: cc_link %s\n flags = %s\n CC = %s\n", out, strings.Join(allInputs, " "), linkFlags, compiler))
+
 	return edges.String()
+
 }
 
 func (r *ccBinary) Desc(m *parser.Module, srcFile string) string {
+
 	if srcFile == "" {
+
 		return "cc_link"
+
 	}
+
 	return "gcc"
-}
 
-// cppLibrary implements a C++ library rule.
-type cppLibrary struct{}
-
-func (r *cppLibrary) Name() string { return "cpp_library" }
-
-func (r *cppLibrary) NinjaRule(ctx RuleRenderContext) string {
-	return fmt.Sprintf(`rule cpp_compile
- command = %s -c $in -o $out $flags -MMD -MF $out.d
- depfile = $out.d
- deps = gcc
-rule cpp_archive
- command = %s rcs $out $in
-rule cpp_shared
- command = %s -shared -o $out $in $flags
-`, ctx.CXX, ctx.AR, ctx.CXX)
-}
-
-func (r *cppLibrary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
-	name := getName(m)
-	if name == "" {
-		return nil
-	}
-	suffix := ctx.ArchSuffix
-	if getBoolProp(m, "shared") {
-		return []string{fmt.Sprintf("lib%s%s.so", name, suffix)}
-	}
-	return []string{fmt.Sprintf("lib%s%s.a", name, suffix)}
-}
-
-func (r *cppLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
-	name := getName(m)
-	srcs := getSrcs(m)
-	if name == "" || len(srcs) == 0 {
-		return ""
-	}
-
-	shared := getBoolProp(m, "shared")
-	cflags := getCflags(m)
-	cppflags := getCppflags(m)
-	ldflags := getLdflags(m)
-	allFlags := joinFlags(cflags, cppflags)
-
-	var sharedInputs []string
-	if shared {
-		sharedLibs := GetListProp(m, "shared_libs")
-		for _, dep := range sharedLibs {
-			depName := strings.TrimPrefix(dep, ":")
-			sharedInputs = append(sharedInputs, sharedLibOutputName(depName, ctx.ArchSuffix))
-			ldflags = joinFlags(ldflags, "-l"+depName)
-		}
-	}
-
-	var edges strings.Builder
-	var objFiles []string
-	for _, src := range srcs {
-		obj := objectOutputName(name, src)
-		objFiles = append(objFiles, obj)
-		edges.WriteString(fmt.Sprintf("build %s: cpp_compile %s\n flags = %s\n", obj, src, allFlags))
-	}
-
-	out := r.Outputs(m, ctx)[0]
-	if shared {
-		allInputs := append(objFiles, sharedInputs...)
-		edges.WriteString(fmt.Sprintf("build %s: cpp_shared %s\n flags = %s\n", out, strings.Join(allInputs, " "), ldflags))
-	} else {
-		edges.WriteString(fmt.Sprintf("build %s: cpp_archive %s\n", out, strings.Join(objFiles, " ")))
-	}
-	return edges.String()
-}
-
-func (r *cppLibrary) Desc(m *parser.Module, srcFile string) string {
-	if srcFile == "" {
-		if getBoolProp(m, "shared") {
-			return "cpp_shared"
-		}
-		return "ar"
-	}
-	return "g++"
-}
-
-// cppBinary implements a C++ binary rule.
-type cppBinary struct{}
-
-func (r *cppBinary) Name() string { return "cpp_binary" }
-
-func (r *cppBinary) NinjaRule(ctx RuleRenderContext) string {
-	return fmt.Sprintf(`rule cpp_compile
- command = %s -c $in -o $out $flags -MMD -MF $out.d
- depfile = $out.d
- deps = gcc
-rule cpp_link
- command = %s -o $out $in $flags
-`, ctx.CXX, ctx.CXX)
-}
-
-func (r *cppBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
-	name := getName(m)
-	if name == "" {
-		return nil
-	}
-	return []string{name + ctx.ArchSuffix}
-}
-
-func (r *cppBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
-	name := getName(m)
-	srcs := getSrcs(m)
-	deps := GetListProp(m, "deps")
-	sharedLibs := GetListProp(m, "shared_libs")
-	if name == "" || len(srcs) == 0 {
-		return ""
-	}
-
-	cflags := joinFlags(ctx.CFlags, getCflags(m))
-	cppflags := getCppflags(m)
-	ldflags := joinFlags(ctx.LdFlags, getLdflags(m))
-	allFlags := joinFlags(cflags, cppflags)
-	linkFlags := ldflags
-
-	var libFiles []string
-	for _, dep := range deps {
-		depName := strings.TrimPrefix(dep, ":")
-		libFiles = append(libFiles, staticLibOutputName(depName, ctx.ArchSuffix))
-	}
-	for _, dep := range sharedLibs {
-		depName := strings.TrimPrefix(dep, ":")
-		libFiles = append(libFiles, sharedLibOutputName(depName, ctx.ArchSuffix))
-		linkFlags = joinFlags(linkFlags, "-l"+depName)
-	}
-
-	var edges strings.Builder
-	var objFiles []string
-	for _, src := range srcs {
-		obj := objectOutputName(name, src)
-		objFiles = append(objFiles, obj)
-		edges.WriteString(fmt.Sprintf("build %s: cpp_compile %s\n flags = %s\n", obj, src, allFlags))
-	}
-
-	out := r.Outputs(m, ctx)[0]
-	allInputs := append(objFiles, libFiles...)
-	edges.WriteString(fmt.Sprintf("build %s: cpp_link %s\n flags = %s\n", out, strings.Join(allInputs, " "), linkFlags))
-	return edges.String()
-}
-
-func (r *cppBinary) Desc(m *parser.Module, srcFile string) string {
-	if srcFile == "" {
-		return "cpp_link"
-	}
-	return "g++"
 }
 
 // ccLibraryHeaders implements a C/C++ header library rule.

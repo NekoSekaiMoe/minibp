@@ -18,8 +18,8 @@ type Dependency struct {
 
 // DependencyGraph represents the complete dependency graph
 type DependencyGraph struct {
-	modules     map[string]*ModuleNode
-	edges       map[string][]string // module -> dependencies
+	modules      map[string]*ModuleNode
+	edges        map[string][]string // module -> dependencies
 	reverseEdges map[string][]string // module -> dependents
 }
 
@@ -53,8 +53,8 @@ type Resolution struct {
 // NewDependencyGraph creates a new dependency graph
 func NewDependencyGraph() *DependencyGraph {
 	return &DependencyGraph{
-		modules:     make(map[string]*ModuleNode),
-		edges:       make(map[string][]string),
+		modules:      make(map[string]*ModuleNode),
+		edges:        make(map[string][]string),
 		reverseEdges: make(map[string][]string),
 	}
 }
@@ -65,10 +65,10 @@ func (g *DependencyGraph) AddModule(name, moduleType string, deps []Dependency) 
 		return
 	}
 	node := &ModuleNode{
-		Name:     name,
-		Type:     moduleType,
+		Name:       name,
+		Type:       moduleType,
 		DirectDeps: deps,
-		IsRoot:   true,
+		IsRoot:     true,
 	}
 	g.modules[name] = node
 	g.edges[name] = make([]string, 0)
@@ -198,8 +198,6 @@ func (g *DependencyGraph) topologicalSort() ([]string, error) {
 
 	}
 
-
-
 	// Calculate in-degrees (count how many modules depend on each module)
 
 	for moduleName, deps := range g.edges {
@@ -224,8 +222,6 @@ func (g *DependencyGraph) topologicalSort() ([]string, error) {
 
 	}
 
-
-
 	// Recalculate: in-degree = number of dependencies
 
 	for name := range g.modules {
@@ -233,8 +229,6 @@ func (g *DependencyGraph) topologicalSort() ([]string, error) {
 		inDegree[name] = len(g.edges[name])
 
 	}
-
-
 
 	// Initialize queue with nodes having in-degree 0 (no dependencies)
 
@@ -250,19 +244,13 @@ func (g *DependencyGraph) topologicalSort() ([]string, error) {
 
 	}
 
-
-
 	// Sort queue for deterministic order
 
 	sort.Strings(queue)
 
-
-
 	result := []string{}
 
 	processed := make(map[string]bool)
-
-
 
 	for len(queue) > 0 {
 
@@ -275,8 +263,6 @@ func (g *DependencyGraph) topologicalSort() ([]string, error) {
 		result = append(result, node)
 
 		processed[node] = true
-
-
 
 		// Find modules that depend on this node and reduce their effective in-degree
 
@@ -322,41 +308,39 @@ func (g *DependencyGraph) topologicalSort() ([]string, error) {
 
 				}
 
-								if allProcessed {
+				if allProcessed {
 
-									// Check if already in queue
+					// Check if already in queue
 
-									found := false
+					found := false
 
-									for _, q := range queue {
+					for _, q := range queue {
 
-										if q == moduleName {
+						if q == moduleName {
 
-											found = true
+							found = true
 
-											break
+							break
 
-										}
+						}
 
-									}
+					}
 
-									if !found {
+					if !found {
 
-										queue = append(queue, moduleName)
+						queue = append(queue, moduleName)
 
-										sort.Strings(queue)
+						sort.Strings(queue)
 
-									}
+					}
 
-								}
+				}
 
 			}
 
 		}
 
 	}
-
-
 
 	// Check for cycle
 
@@ -365,8 +349,6 @@ func (g *DependencyGraph) topologicalSort() ([]string, error) {
 		return nil, fmt.Errorf("circular dependency detected")
 
 	}
-
-
 
 	return result, nil
 

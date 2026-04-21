@@ -43,11 +43,11 @@ type Toolchain struct {
 
 // ToolchainConfig provides toolchain detection and configuration
 type ToolchainConfig struct {
-	defaultCC   string
-	defaultCXX  string
-	defaultAR   string
-	defaultLD   string
-	toolchains  map[string]*Toolchain
+	defaultCC  string
+	defaultCXX string
+	defaultAR  string
+	defaultLD  string
+	toolchains map[string]*Toolchain
 }
 
 // NewToolchainConfig creates a new toolchain configuration manager

@@ -149,8 +149,8 @@ func TestHelperFunctions(t *testing.T) {
 
 func TestErrorContext(t *testing.T) {
 	ctx := &ErrorContext{
-		Snippet:      "code snippet",
-		RelatedFiles: []string{"file1.bp", "file2.bp"},
+		Snippet:         "code snippet",
+		RelatedFiles:    []string{"file1.bp", "file2.bp"},
 		DependencyChain: []string{"A", "B", "C"},
 	}
 	err := NewError(DependencyError, "test").WithContext(ctx)
