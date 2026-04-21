@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"minibp/parser"
+	"minibp/lib/parser"
 )
 
 // Factory is the interface for creating Module instances from AST nodes.

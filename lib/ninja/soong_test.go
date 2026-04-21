@@ -2,7 +2,7 @@
 package ninja
 
 import (
-	"minibp/parser"
+	"minibp/lib/parser"
 	"strings"
 	"testing"
 )

@@ -13,7 +13,7 @@ import (
 	"sort"
 	"strings"
 
-	"minibp/parser"
+	"minibp/lib/parser"
 )
 
 // Hasher calculates and stores hashes for modules

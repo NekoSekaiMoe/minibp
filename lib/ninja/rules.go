@@ -4,7 +4,7 @@
 package ninja
 
 import (
-	"minibp/parser"
+	"minibp/lib/parser"
 	"path/filepath"
 	"strings"
 )

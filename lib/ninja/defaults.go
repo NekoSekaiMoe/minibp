@@ -2,7 +2,7 @@
 package ninja
 
 import (
-	"minibp/parser"
+	"minibp/lib/parser"
 )
 
 // defaults implements a defaults module that provides reusable property sets.

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"minibp/parser"
+	"minibp/lib/parser"
 )
 
 // TestExpandGlobRecursiveExtension tests recursive glob expansion (**/*.go)

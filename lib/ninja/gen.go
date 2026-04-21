@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"strings"
 
-	"minibp/parser"
+	"minibp/lib/parser"
 )
 
 // Graph is the interface needed for ninja generation.

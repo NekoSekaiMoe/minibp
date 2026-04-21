@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"minibp/parser"
+	"minibp/lib/parser"
 )
 
 // MockFactory is a test implementation of the Factory interface.

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sort"
 
-	"minibp/module"
+	"minibp/lib/module"
 )
 
 // Graph represents a directed acyclic graph of module dependencies.

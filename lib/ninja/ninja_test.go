@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"minibp/dag"
-	"minibp/parser"
+	"minibp/lib/dag"
+	"minibp/lib/parser"
 )
 
 type dagMockModule struct {

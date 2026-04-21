@@ -5,11 +5,11 @@
 go_library {
   name: "libversion",
   srcs: [
-    "internal/version/version.go",
+    "lib/version/version.go",
   ],
   goflags: ["-trimpath"],
   ldflags: [
-    "-X 'minibp/internal/version.gitTag=0.001'",
+    "-X 'minibp/lib/version.gitTag=0.001'",
     "-s",
     "-w",
   ],
@@ -27,10 +27,12 @@ go_binary {
     ":libninja",
     ":libmodule",
     ":libversion",
+    ":libtoolchain",
+    ":liberrors",
   ],
   goflags: ["-trimpath"],
   ldflags: [
-    "-X 'minibp/internal/version.gitTag=0.001'",
+    "-X 'minibp/lib/version.gitTag=0.001'",
     "-s",
     "-w",
   ],
@@ -38,128 +40,202 @@ go_binary {
 
 // Parser library
 go_library {
-    name: "libparser",
-    srcs: [
-        "parser/ast.go",
-        "parser/lexer.go",
-        "parser/parser.go",
-    ],
+  name: "libparser",
+  srcs: [
+    "lib/parser/ast.go",
+    "lib/parser/lexer.go",
+    "lib/parser/parser.go",
+    "lib/parser/eval.go",
+  ],
 }
 
 // DAG library
 go_library {
-    name: "libdag",
-    srcs: [
-        "dag/graph.go",
-    ],
-    deps: [
-        ":libmodule",
-    ],
+  name: "libdag",
+  srcs: [
+    "lib/dag/graph.go",
+  ],
+  deps: [
+    ":libmodule",
+  ],
 }
 
 // Module library
 go_library {
-    name: "libmodule",
-    srcs: [
-        "module/module.go",
-        "module/registry.go",
-        "module/types.go",
-    ],
-    deps: [
-        ":libparser",
-    ],
+  name: "libmodule",
+  srcs: [
+    "lib/module/module.go",
+    "lib/module/registry.go",
+    "lib/module/types.go",
+  ],
+  deps: [
+    ":libparser",
+  ],
 }
 
 // Ninja generator library
 go_library {
-    name: "libninja",
-    srcs: [
-        "ninja/gen.go",
-        "ninja/rules.go",
-        "ninja/writer.go",
-        "ninja/cc.go",
-        "ninja/go.go",
-        "ninja/java.go",
-        "ninja/filegroup.go",
-        "ninja/custom.go",
-        "ninja/defaults.go",
-    ],
-    deps: [
-        ":libparser",
-        ":libdag",
-        ":libmodule",
-    ],
+  name: "libninja",
+  srcs: [
+    "lib/ninja/gen.go",
+    "lib/ninja/rules.go",
+    "lib/ninja/writer.go",
+    "lib/ninja/cc.go",
+    "lib/ninja/go.go",
+    "lib/ninja/java.go",
+    "lib/ninja/filegroup.go",
+    "lib/ninja/custom.go",
+    "lib/ninja/defaults.go",
+  ],
+  deps: [
+    ":libparser",
+    ":libdag",
+    ":libmodule",
+  ],
+}
+
+// Toolchain library
+go_library {
+  name: "libtoolchain",
+  srcs: [
+    "lib/toolchain/toolchain.go",
+  ],
+}
+
+// Errors library
+go_library {
+  name: "liberrors",
+  srcs: [
+    "lib/errors/errors.go",
+  ],
+}
+
+// Dependency graph library
+go_library {
+  name: "libdependency",
+  srcs: [
+    "lib/dependency/graph.go",
+  ],
+}
+
+// Hasher library
+go_library {
+  name: "libhasher",
+  srcs: [
+    "lib/hasher/hasher.go",
+  ],
+  deps: [
+    ":libparser",
+  ],
 }
 
 // Test binary for parser
 go_test {
-    name: "test_parser",
-    srcs: [
-        "parser/parser_test.go",
-    ],
-    deps: [
-        ":libparser",
-    ],
+  name: "test_parser",
+  srcs: [
+    "lib/parser/parser_test.go",
+    "lib/parser/eval_test.go",
+  ],
+  deps: [
+    ":libparser",
+  ],
 }
 
 // Test binary for DAG
 go_test {
-    name: "test_dag",
-    srcs: [
-        "dag/graph_test.go",
-    ],
-    deps: [
-        ":libdag",
-        ":libmodule",
-        ":libparser",
-    ],
+  name: "test_dag",
+  srcs: [
+    "lib/dag/graph_test.go",
+  ],
+  deps: [
+    ":libdag",
+    ":libmodule",
+    ":libparser",
+  ],
 }
 
 // Test binary for ninja
 go_test {
-    name: "test_ninja",
-    srcs: [
-        "ninja/ninja_test.go",
-    ],
-    deps: [
-        ":libninja",
-        ":libparser",
-        ":libdag",
-        ":libmodule",
-    ],
+  name: "test_ninja",
+  srcs: [
+    "lib/ninja/ninja_test.go",
+    "lib/ninja/soong_test.go",
+  ],
+  deps: [
+    ":libninja",
+    ":libparser",
+    ":libdag",
+    ":libmodule",
+  ],
 }
 
 // Test binary for module
 go_test {
-    name: "test_module",
-    srcs: [
-        "module/module_test.go",
-    ],
-    deps: [
-        ":libmodule",
-        ":libparser",
-    ],
+  name: "test_module",
+  srcs: [
+    "lib/module/module_test.go",
+  ],
+  deps: [
+    ":libmodule",
+    ":libparser",
+  ],
+}
+
+// Test binary for toolchain
+go_test {
+  name: "test_toolchain",
+  srcs: [
+    "lib/toolchain/toolchain_test.go",
+  ],
+}
+
+// Test binary for errors
+go_test {
+  name: "test_errors",
+  srcs: [
+    "lib/errors/errors_test.go",
+  ],
+}
+
+// Test binary for dependency
+go_test {
+  name: "test_dependency",
+  srcs: [
+    "lib/dependency/graph_test.go",
+  ],
+}
+
+// Test binary for hasher
+go_test {
+  name: "test_hasher",
+  srcs: [
+    "lib/hasher/hasher_test.go",
+  ],
+  deps: [
+    ":libhasher",
+    ":libparser",
+  ],
 }
 
 // Build all tests
 custom {
-    name: "test_all",
-    cmd: "go test ./...",
-    srcs: [
-        "**/*.go",
-    ],
-    exclude_dirs: ["examples"],
-    outs: ["test_result.txt"],
+  name: "test_all",
+  cmd: "go test ./...",
+  srcs: [
+    "lib/**/*.go",
+    "cmd/**/*.go",
+  ],
+  outs: ["test_result.txt"],
 }
 
 custom {
-    name: "format",
-    cmd: "go fmt",
-    srcs: [
-        "**/*.go",
-    ],
-    exclude_dirs: ["examples"],
-    outs: ["test.txt"],
+  name: "format",
+  cmd: "go fmt ./...",
+  srcs: [
+    "lib/**/*.go",
+    "cmd/**/*.go",
+  ],
+  outs: ["format_result.txt"],
 }
 
 // Note: Use './minibp -o build.ninja Android.bp' to regenerate build.ninja

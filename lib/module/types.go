@@ -5,7 +5,7 @@ package module
 
 import (
 	"fmt"
-	"minibp/parser"
+	"minibp/lib/parser"
 )
 
 // extractStringList extracts a list of string values from an AST map property.

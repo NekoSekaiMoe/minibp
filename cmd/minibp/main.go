@@ -3,6 +3,7 @@
 package main
 
 import (
+
 	"flag"
 
 	"fmt"
@@ -19,11 +20,12 @@ import (
 
 	"strings"
 
-	"minibp/internal/version"
+	"minibp/lib/ninja"
 
-	"minibp/ninja"
+	"minibp/lib/parser"
 
-	"minibp/parser"
+	"minibp/lib/version"
+
 )
 
 // openInputFile is a dependency injection for opening input files.

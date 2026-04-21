@@ -3,7 +3,7 @@ package ninja
 
 import (
 	"fmt"
-	"minibp/parser"
+	"minibp/lib/parser"
 	"path/filepath"
 	"runtime"
 	"strings"

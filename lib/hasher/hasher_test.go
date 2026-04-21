@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"minibp/parser"
+	"minibp/lib/parser"
 )
 
 // Helper function to parse module
