@@ -40,35 +40,19 @@ func (r *ccLibrary) NinjaRule(ctx RuleRenderContext) string {
 
 	return fmt.Sprintf(`rule cc_compile
 
+command = ${CC} -c $in -o $out $flags -MMD -MF $out.d
 
+depfile = $out.d
 
-  command = ${CC} -c $in -o $out $flags -MMD -MF $out.d
-
-
-
-  depfile = $out.d
-
-
-
-  deps = gcc
-
-
+deps = gcc
 
 rule cc_archive
 
-
-
-  command = %s rcs $out $in
-
-
+command = %s rcs $out $in
 
 rule cc_shared
 
-
-
-  command = ${CC} -shared -o $out $in $flags
-
-
+command = ${CC} -shared -o $out $in $flags
 
 `, ctx.AR)
 
@@ -188,13 +172,21 @@ type ccLibraryStatic struct{}
 func (r *ccLibraryStatic) Name() string { return "cc_library_static" }
 
 func (r *ccLibraryStatic) NinjaRule(ctx RuleRenderContext) string {
+
 	return fmt.Sprintf(`rule cc_compile
- command = %s -c $in -o $out $flags -MMD -MF $out.d
- depfile = $out.d
- deps = gcc
+
+command = %s -c $in -o $out $flags -MMD -MF $out.d
+
+depfile = $out.d
+
+deps = gcc
+
 rule cc_archive
- command = %s rcs $out $in
+
+command = %s rcs $out $in
+
 `, ctx.CC, ctx.AR)
+
 }
 
 func (r *ccLibraryStatic) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
@@ -240,13 +232,21 @@ type ccLibraryShared struct{}
 func (r *ccLibraryShared) Name() string { return "cc_library_shared" }
 
 func (r *ccLibraryShared) NinjaRule(ctx RuleRenderContext) string {
+
 	return fmt.Sprintf(`rule cc_compile
- command = %s -c $in -o $out $flags -MMD -MF $out.d
- depfile = $out.d
- deps = gcc
+
+command = %s -c $in -o $out $flags -MMD -MF $out.d
+
+depfile = $out.d
+
+deps = gcc
+
 rule cc_shared
- command = %s -shared -o $out $in $flags
+
+command = %s -shared -o $out $in $flags
+
 `, ctx.CC, ctx.CC)
+
 }
 
 func (r *ccLibraryShared) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
@@ -302,11 +302,17 @@ type ccObject struct{}
 func (r *ccObject) Name() string { return "cc_object" }
 
 func (r *ccObject) NinjaRule(ctx RuleRenderContext) string {
+
 	return fmt.Sprintf(`rule cc_compile
- command = %s -c $in -o $out $flags -MMD -MF $out.d
- depfile = $out.d
- deps = gcc
+
+command = %s -c $in -o $out $flags -MMD -MF $out.d
+
+depfile = $out.d
+
+deps = gcc
+
 `, ctx.CC)
+
 }
 
 func (r *ccObject) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
@@ -356,13 +362,21 @@ type ccBinary struct{}
 func (r *ccBinary) Name() string { return "cc_binary" }
 
 func (r *ccBinary) NinjaRule(ctx RuleRenderContext) string {
+
 	return fmt.Sprintf(`rule cc_compile
- command = %s -c $in -o $out $flags -MMD -MF $out.d
- depfile = $out.d
- deps = gcc
+
+command = %s -c $in -o $out $flags -MMD -MF $out.d
+
+depfile = $out.d
+
+deps = gcc
+
 rule cc_link
- command = %s -o $out $in $flags
+
+command = %s -o $out $in $flags
+
 `, ctx.CC, ctx.CC)
+
 }
 
 func (r *ccBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {

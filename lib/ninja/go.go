@@ -14,9 +14,13 @@ type goLibrary struct{}
 func (r *goLibrary) Name() string { return "go_library" }
 
 func (r *goLibrary) NinjaRule(ctx RuleRenderContext) string {
+
 	return `rule go_build_archive
+
  command = go build -buildmode=archive -o $out $in
+
 `
+
 }
 
 func (r *goLibrary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
@@ -73,10 +77,14 @@ type goBinary struct{}
 func (r *goBinary) Name() string { return "go_binary" }
 
 func (r *goBinary) NinjaRule(ctx RuleRenderContext) string {
-	return `rule go_build
- command = go build -o $out $in
-`
-}
+
+		return `rule go_build
+
+	 command = go build -o $out $in
+
+	`
+
+	}
 
 func (r *goBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
@@ -154,9 +162,13 @@ type goTest struct{}
 func (r *goTest) Name() string { return "go_test" }
 
 func (r *goTest) NinjaRule(ctx RuleRenderContext) string {
+
 	return `rule go_test
+
  command = go test -c -o $out $pkg
+
 `
+
 }
 
 func (r *goTest) Outputs(m *parser.Module, ctx RuleRenderContext) []string {

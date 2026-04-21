@@ -261,35 +261,95 @@ func (g *Generator) Generate(w io.Writer) error {
 		nw.Comment("")
 	}
 
-	ctx := g.ruleRenderContext()
+			ctx := g.ruleRenderContext()
 
-	usedModuleTypes := g.collectUsedModuleTypes()
+			usedModuleTypes := g.collectUsedModuleTypes()
 
-	writtenNinjaRules := make(map[string]bool)
+			writtenNinjaRules := make(map[string]bool)
 
-	for _, moduleType := range usedModuleTypes {
-		if rule, ok := g.rules[moduleType]; ok {
-			ruleDef := rule.NinjaRule(ctx)
-			if ruleDef == "" {
-				continue
+			for _, moduleType := range usedModuleTypes {
+
+				if rule, ok := g.rules[moduleType]; ok {
+
+					ruleDef := rule.NinjaRule(ctx)
+
+					if ruleDef == "" {
+
+						continue
+
+					}
+
+								// Split multiple rules in the same definition
+
+								// Each rule starts with "rule " prefix
+
+								lines := strings.Split(ruleDef, "\n")
+
+								var currentRuleName string
+
+								for i, line := range lines {
+
+									trimmed := strings.TrimSpace(line)
+
+									if trimmed == "" {
+
+										continue
+
+									}
+
+									// Check if this is a rule definition line
+
+									if strings.HasPrefix(trimmed, "rule ") {
+
+										// Extract rule name
+
+										parts := strings.Fields(trimmed)
+
+										if len(parts) >= 2 {
+
+											currentRuleName = parts[1]
+
+											// Skip if already written
+
+											if writtenNinjaRules[currentRuleName] {
+
+												currentRuleName = ""
+
+												continue
+
+											}
+
+											writtenNinjaRules[currentRuleName] = true
+
+										}
+
+									}
+
+									// Skip rule name line if we're skipping this rule
+
+									if currentRuleName == "" {
+
+										continue
+
+									}
+
+									// Add leading space for attribute lines (Ninja syntax requires this)
+
+									if i > 0 && !strings.HasPrefix(trimmed, "rule ") {
+
+										fmt.Fprintf(w, " %s\n", trimmed)
+
+									} else {
+
+										fmt.Fprintf(w, "%s\n", trimmed)
+
+									}
+
+								}
+
+				}
+
 			}
-			parts := strings.Split(ruleDef, "rule ")
-			for i, part := range parts {
-				if i == 0 && part == "" {
-					continue
-				}
-				if part == "" {
-					continue
-				}
-				lines := strings.SplitN(part, "\n", 2)
-				ninjaRuleName := strings.TrimSpace(lines[0])
-				if ninjaRuleName != "" && !writtenNinjaRules[ninjaRuleName] {
-					writtenNinjaRules[ninjaRuleName] = true
-					fmt.Fprintf(w, "rule %s", strings.TrimRight(part, " \t"))
-				}
-			}
-		}
-	}
 
 	levels, err := g.graph.TopoSort()
 	if err != nil {
