@@ -4,6 +4,7 @@ package ninja
 import (
 	"minibp/lib/parser"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -244,4 +245,64 @@ func sharedLibOutputName(name string, archSuffix string) string {
 // staticLibOutputName generates the output name for a static library (.a).
 func staticLibOutputName(name string, archSuffix string) string {
 	return libOutputName(name, archSuffix, ".a")
+}
+
+func getFirstSource(m *parser.Module) string {
+	srcs := getSrcs(m)
+	if len(srcs) == 0 {
+		return ""
+	}
+	return srcs[0]
+}
+
+func getData(m *parser.Module) []string {
+	return GetListProp(m, "data")
+}
+
+func copyCommand() string {
+	if runtime.GOOS == "windows" {
+		return "cmd /c copy $in $out"
+	}
+	return "cp $in $out"
+}
+
+func getTestOptionArgs(m *parser.Module) string {
+	return strings.Join(GetMapStringListProp(GetMapProp(m, "test_options"), "args"), " ")
+}
+
+func GetMapProp(m *parser.Module, name string) *parser.Map {
+	if m.Map == nil {
+		return nil
+	}
+	for _, prop := range m.Map.Properties {
+		if prop.Name == name {
+			if mp, ok := prop.Value.(*parser.Map); ok {
+				return mp
+			}
+		}
+	}
+	return nil
+}
+
+func GetMapStringListProp(mp *parser.Map, name string) []string {
+	if mp == nil {
+		return nil
+	}
+	for _, prop := range mp.Properties {
+		if prop.Name == name {
+			if list, ok := prop.Value.(*parser.List); ok {
+				var out []string
+				for _, v := range list.Values {
+					if s, ok := v.(*parser.String); ok {
+						out = append(out, s.Value)
+					}
+				}
+				return out
+			}
+			if s, ok := prop.Value.(*parser.String); ok {
+				return []string{s.Value}
+			}
+		}
+	}
+	return nil
 }

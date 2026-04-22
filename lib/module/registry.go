@@ -118,6 +118,22 @@ func registryLen() int {
 	return len(registry)
 }
 
+func RegisterAlias(name, baseType string) {
+	registryMu.RLock()
+	base := registry[baseType]
+	registryMu.RUnlock()
+	if base != nil {
+		Register(name, base)
+	}
+}
+
+func Has(name string) bool {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	_, ok := registry[name]
+	return ok
+}
+
 // Create builds a Module from an AST node using the appropriate factory.
 // It looks up the factory by the module type and delegates creation to it.
 // Parameters:

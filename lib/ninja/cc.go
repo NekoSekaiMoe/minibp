@@ -645,6 +645,9 @@ func ccTestEdge(m *parser.Module, ctx RuleRenderContext) string {
 		linkRule = "cc_link_lto"
 	}
 	edges.WriteString(fmt.Sprintf("build %s: %s %s\n flags = %s\n CC = %s\n", ninjaEscapePath(out), linkRule, strings.Join(allInputs, " "), linkFlags, compiler))
+	if args := getTestOptionArgs(m); args != "" {
+		edges.WriteString(fmt.Sprintf(" test_args = %s\n", args))
+	}
 	if moduleLto == "thin" {
 		for _, src := range srcs {
 			obj := objectOutputName(name, src)

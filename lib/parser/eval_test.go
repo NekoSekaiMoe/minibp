@@ -221,6 +221,56 @@ cc_library {
 	}
 }
 
+func TestEvaluatorSelectWithVariantCondition(t *testing.T) {
+	input := `cc_binary {
+    name: "test",
+    cflags: select(variant("image"), {
+        "recovery": ["-DRECOVERY"],
+        default: ["-DNORMAL"],
+    }),
+}`
+
+	p := NewParser(strings.NewReader(input), "test.bp")
+	file, errs := p.Parse()
+	if len(errs) > 0 {
+		t.Fatalf("Parse errors: %v", errs)
+	}
+
+	mod := file.Defs[0].(*Module)
+	prop := findProp(mod.Map, "cflags")
+	eval := NewEvaluator()
+	eval.SetConfig("variant.image", "recovery")
+	got := EvalToStringList(prop.Value, eval)
+	if len(got) != 1 || got[0] != "-DRECOVERY" {
+		t.Fatalf("Expected variant select to match recovery, got %v", got)
+	}
+}
+
+func TestEvaluatorSelectWithProductVariableCondition(t *testing.T) {
+	input := `cc_binary {
+    name: "test",
+    cflags: select(product_variable("debuggable"), {
+        "true": ["-DDEBUGGABLE"],
+        default: ["-DUSER"],
+    }),
+}`
+
+	p := NewParser(strings.NewReader(input), "test.bp")
+	file, errs := p.Parse()
+	if len(errs) > 0 {
+		t.Fatalf("Parse errors: %v", errs)
+	}
+
+	mod := file.Defs[0].(*Module)
+	prop := findProp(mod.Map, "cflags")
+	eval := NewEvaluator()
+	eval.SetConfig("product.debuggable", "true")
+	got := EvalToStringList(prop.Value, eval)
+	if len(got) != 1 || got[0] != "-DDEBUGGABLE" {
+		t.Fatalf("Expected product_variable select to match true, got %v", got)
+	}
+}
+
 // TestEvaluatorStringInterpolationInAssignment tests string interpolation
 // using ${var} syntax in assignment values. Variables in ${...} should be
 // substituted with their values.

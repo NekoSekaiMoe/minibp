@@ -13,6 +13,15 @@ type defaults struct{}
 
 func (r *defaults) Name() string { return "defaults" }
 
+func isDefaultsModuleType(typeName string) bool {
+	switch typeName {
+	case "defaults", "cc_defaults", "java_defaults", "go_defaults":
+		return true
+	default:
+		return false
+	}
+}
+
 func (r *defaults) NinjaRule(ctx RuleRenderContext) string {
 	// Defaults modules don't produce any ninja rules
 	return ""
@@ -31,6 +40,20 @@ func (r *defaults) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 func (r *defaults) Desc(m *parser.Module, srcFile string) string {
 	return ""
 }
+
+type defaultsModule struct {
+	typeName string
+}
+
+func (r *defaultsModule) Name() string { return r.typeName }
+
+func (r *defaultsModule) NinjaRule(ctx RuleRenderContext) string { return "" }
+
+func (r *defaultsModule) Outputs(m *parser.Module, ctx RuleRenderContext) []string { return nil }
+
+func (r *defaultsModule) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string { return "" }
+
+func (r *defaultsModule) Desc(m *parser.Module, srcFile string) string { return "" }
 
 // packageModule implements a package module that sets default properties for a package.
 // Package modules are named after their package path (e.g., "my/package").
@@ -221,7 +244,7 @@ func (r *pythonTestHostRule) Name() string { return "python_test_host" }
 
 func (r *pythonTestHostRule) NinjaRule(ctx RuleRenderContext) string {
 	return `rule python_test
- command = python3 $in
+ command = python3 $in $args
  description = Run Python test $in
 `
 }
@@ -241,7 +264,12 @@ func (r *pythonTestHostRule) NinjaEdge(m *parser.Module, ctx RuleRenderContext) 
 		return ""
 	}
 	out := name + ".test.py"
-	return fmt.Sprintf("build %s: python_test %s\n", ninjaEscapePath(out), ninjaEscapePath(srcs[0]))
+	args := getTestOptionArgs(m)
+	edge := fmt.Sprintf("build %s: python_test %s\n", ninjaEscapePath(out), ninjaEscapePath(srcs[0]))
+	if args != "" {
+		edge += fmt.Sprintf(" args = %s\n", args)
+	}
+	return edge
 }
 
 func (r *pythonTestHostRule) Desc(m *parser.Module, srcFile string) string {

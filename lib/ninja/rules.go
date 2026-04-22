@@ -71,9 +71,21 @@ func GetAllRules() []BuildRule {
 		&soongNamespace{},
 		&phonyRule{},
 		&ccTestRule{},
+		&genrule{},
+		&defaultsModule{typeName: "cc_defaults"},
+		&defaultsModule{typeName: "java_defaults"},
+		&defaultsModule{typeName: "go_defaults"},
 
 		// Other rules
 		&filegroup{},
+		&prebuiltEtcRule{typeName: "prebuilt_etc", subdir: "etc"},
+		&prebuiltEtcRule{typeName: "prebuilt_usr_share", subdir: "usr/share"},
+		&prebuiltEtcRule{typeName: "prebuilt_firmware", subdir: "firmware"},
+		&prebuiltEtcRule{typeName: "prebuilt_root", subdir: ""},
+		&prebuiltBinaryRule{typeName: "cc_prebuilt_binary"},
+		&prebuiltLibraryRule{typeName: "cc_prebuilt_library", ext: ".a"},
+		&prebuiltLibraryRule{typeName: "cc_prebuilt_library_static", ext: ".a"},
+		&prebuiltLibraryRule{typeName: "cc_prebuilt_library_shared", ext: ".so"},
 		&customRule{},
 		&protoLibraryRule{},
 		&protoGenRule{},
@@ -159,7 +171,7 @@ func ApplyDefaults(m *parser.Module, modules map[string]*parser.Module) {
 		if !ok || defaultMod == nil {
 			continue
 		}
-		if defaultMod.Type != "defaults" {
+		if !isDefaultsModuleType(defaultMod.Type) {
 			continue
 		}
 		if defaultMod.Map != nil {

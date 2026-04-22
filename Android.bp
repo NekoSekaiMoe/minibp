@@ -22,10 +22,14 @@ go_binary {
     "cmd/minibp/main.go",
   ],
   deps: [
+    ":libutils",
+    ":libbuild",
     ":libparser",
     ":libdag",
     ":libninja",
     ":libmodule",
+    ":libnamespace",
+    ":libprops",
     ":libversion",
     ":libtoolchain",
     ":liberrors",
@@ -35,6 +39,33 @@ go_binary {
     "-X 'minibp/lib/version.gitTag=0.001'",
     "-s",
     "-w",
+  ],
+}
+
+go_library {
+  name: "libutils",
+  srcs: [
+    "lib/utils/utils.go",
+  ],
+  deps: [
+    ":libbuild",
+    ":libparser",
+    ":libversion",
+  ],
+}
+
+go_library {
+  name: "libbuild",
+  srcs: [
+    "lib/build/build.go",
+  ],
+  deps: [
+    ":libglob",
+    ":libnamespace",
+    ":libninja",
+    ":libparser",
+    ":libprops",
+    ":libvariant",
   ],
 }
 
@@ -73,11 +104,54 @@ go_library {
   ],
 }
 
+go_library {
+  name: "libnamespace",
+  srcs: [
+    "lib/namespace/namespace.go",
+  ],
+  deps: [
+    ":libmodule",
+    ":libparser",
+    ":libvariant",
+  ],
+}
+
+go_library {
+  name: "libprops",
+  srcs: [
+    "lib/props/props.go",
+  ],
+  deps: [
+    ":libparser",
+  ],
+}
+
+go_library {
+  name: "libglob",
+  srcs: [
+    "lib/glob/glob.go",
+  ],
+  deps: [
+    ":libparser",
+  ],
+}
+
+go_library {
+  name: "libvariant",
+  srcs: [
+    "lib/variant/variant.go",
+  ],
+  deps: [
+    ":libparser",
+  ],
+}
+
 // Ninja generator library
 go_library {
   name: "libninja",
 srcs: [
     "lib/ninja/gen.go",
+    "lib/ninja/genrule.go",
     "lib/ninja/rules.go",
     "lib/ninja/writer.go",
     "lib/ninja/cc.go",
@@ -87,6 +161,7 @@ srcs: [
     "lib/ninja/custom.go",
     "lib/ninja/defaults.go",
     "lib/ninja/helpers.go",
+    "lib/ninja/prebuilt.go",
 ],
   deps: [
     ":libparser",

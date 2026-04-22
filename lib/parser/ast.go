@@ -20,12 +20,14 @@ type Expression interface {
 // It can also have architecture-specific (arch), host-specific (host), and
 // target-specific (target) property overrides.
 type Module struct {
-	Type    string           // Module type name (e.g., "cc_binary", "cc_library")
-	TypePos scanner.Position // Source position of the type name
-	Map     *Map             // Main property map (name: value, ...)
-	Arch    map[string]*Map  // Arch-specific overrides: arch name -> properties (e.g., "arm" -> {srcs: ...})
-	Host    *Map             // Host-specific overrides (e.g., host: {cflags: ...})
-	Target  *Map             // Target-specific overrides (e.g., target: {cflags: ...})
+	Type     string           // Module type name (e.g., "cc_binary", "cc_library")
+	TypePos  scanner.Position // Source position of the type name
+	Map      *Map             // Main property map (name: value, ...)
+	Arch     map[string]*Map  // Arch-specific overrides: arch name -> properties
+	Host     *Map             // Host-specific overrides
+	Target   *Map             // Target-specific overrides
+	Multilib map[string]*Map  // Multilib overrides: "lib32"/"lib64" -> properties
+	Override bool             // True if this module has override: true
 }
 
 // Pos returns the source position of the module type.

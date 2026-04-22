@@ -343,10 +343,14 @@ func (r *javaTest) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	javaflags := getJavaflags(m)
 	out := r.Outputs(m, ctx)[0]
 	outdir := name + "_classes"
+	testArgs := getTestOptionArgs(m)
 
 	var edges strings.Builder
 	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_test %s\n outdir = %s\n flags = %s\n", name, strings.Join(srcs, " "), outdir, javaflags))
 	edges.WriteString(fmt.Sprintf("build %s: jar_test %s.stamp\n outdir = %s\n", out, name, outdir))
+	if testArgs != "" {
+		edges.WriteString(fmt.Sprintf(" test_args = %s\n", testArgs))
+	}
 	return edges.String()
 }
 

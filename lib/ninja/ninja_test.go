@@ -145,6 +145,135 @@ func TestCollectBuildOutputs(t *testing.T) {
 	}
 }
 
+func TestGeneratorAddsDataDepsToBuildEdge(t *testing.T) {
+	graph := dag.NewGraph()
+	graph.AddModule(&dagMockModule{name: "payload"})
+	graph.AddModule(&dagMockModule{name: "runner"})
+	graph.AddEdge("runner", "payload")
+
+	modules := map[string]*parser.Module{
+		"payload": {
+			Type: "filegroup",
+			Map: &parser.Map{Properties: []*parser.Property{
+				{Name: "name", Value: &parser.String{Value: "payload"}},
+				{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "assets/config.json"},
+				}}},
+			}},
+		},
+		"runner": {
+			Type: "python_test_host",
+			Map: &parser.Map{Properties: []*parser.Property{
+				{Name: "name", Value: &parser.String{Value: "runner"}},
+				{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "runner_test.py"},
+				}}},
+				{Name: "data", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: ":payload"},
+				}}},
+				{Name: "test_options", Value: &parser.Map{Properties: []*parser.Property{
+					{Name: "args", Value: &parser.List{Values: []parser.Expression{
+						&parser.String{Value: "--verbose"},
+					}}},
+				}}},
+			}},
+		},
+	}
+
+	rules := map[string]BuildRule{
+		"filegroup":        &filegroup{},
+		"python_test_host": &pythonTestHostRule{},
+	}
+
+	var buf bytes.Buffer
+	gen := NewGenerator(graph, rules, modules)
+	if err := gen.Generate(&buf); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "build runner.test.py: python_test runner_test.py | payload.files") {
+		t.Fatalf("Expected data dependency on payload.files, got: %s", out)
+	}
+	if !strings.Contains(out, "args = --verbose") {
+		t.Fatalf("Expected python test args from test_options, got: %s", out)
+	}
+}
+
+func TestGeneratorAddsDistEdges(t *testing.T) {
+	graph := dag.NewGraph()
+	graph.AddModule(&dagMockModule{name: "tool"})
+
+	modules := map[string]*parser.Module{
+		"tool": {
+			Type: "cc_prebuilt_binary",
+			Map: &parser.Map{Properties: []*parser.Property{
+				{Name: "name", Value: &parser.String{Value: "tool"}},
+				{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "prebuilts/tool"},
+				}}},
+				{Name: "dist", Value: &parser.Map{Properties: []*parser.Property{
+					{Name: "dir", Value: &parser.String{Value: "artifacts"}},
+					{Name: "dest", Value: &parser.String{Value: "tool-release"}},
+				}}},
+			}},
+		},
+	}
+
+	rules := map[string]BuildRule{
+		"cc_prebuilt_binary": &prebuiltBinaryRule{typeName: "cc_prebuilt_binary"},
+		"prebuilt_etc":       &prebuiltEtcRule{typeName: "prebuilt_etc", subdir: "etc"},
+	}
+
+	var buf bytes.Buffer
+	gen := NewGenerator(graph, rules, modules)
+	if err := gen.Generate(&buf); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "build dist/artifacts/tool-release: prebuilt_copy tool") {
+		t.Fatalf("Expected dist edge, got: %s", out)
+	}
+}
+
+func TestGeneratorAddsDistSuffix(t *testing.T) {
+	graph := dag.NewGraph()
+	graph.AddModule(&dagMockModule{name: "libfoo"})
+
+	modules := map[string]*parser.Module{
+		"libfoo": {
+			Type: "cc_prebuilt_library_shared",
+			Map: &parser.Map{Properties: []*parser.Property{
+				{Name: "name", Value: &parser.String{Value: "foo"}},
+				{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "prebuilts/libfoo.so"},
+				}}},
+				{Name: "dist", Value: &parser.Map{Properties: []*parser.Property{
+					{Name: "dir", Value: &parser.String{Value: "symbols"}},
+					{Name: "suffix", Value: &parser.String{Value: "-dbg"}},
+				}}},
+			}},
+		},
+	}
+
+	rules := map[string]BuildRule{
+		"cc_prebuilt_library_shared": &prebuiltLibraryRule{typeName: "cc_prebuilt_library_shared", ext: ".so"},
+		"prebuilt_etc":               &prebuiltEtcRule{typeName: "prebuilt_etc", subdir: "etc"},
+	}
+
+	var buf bytes.Buffer
+	gen := NewGenerator(graph, rules, modules)
+	if err := gen.Generate(&buf); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "build dist/symbols/libfoo-dbg.so: prebuilt_copy libfoo.so") {
+		t.Fatalf("Expected dist suffix edge, got: %s", out)
+	}
+}
+
 func TestJavaImportRuleUsesPlatformCopyCommand(t *testing.T) {
 	r := &javaImport{}
 	rule := r.NinjaRule(DefaultRuleRenderContext())
@@ -1288,6 +1417,54 @@ func TestCCTestRule(t *testing.T) {
 	outs := r.Outputs(m, DefaultRuleRenderContext())
 	if len(outs) != 1 || outs[0] != "foo_test.test" {
 		t.Fatalf("Expected [foo_test.test], got %v", outs)
+	}
+	edge := r.NinjaEdge(m, DefaultRuleRenderContext())
+	if !strings.Contains(edge, "build foo_test.test: cc_link foo_test_foo_test.o") {
+		t.Fatalf("Expected cc_test link edge, got: %s", edge)
+	}
+}
+
+func TestCCTestRuleIncludesTestOptionsArgs(t *testing.T) {
+	r := &ccTestRule{}
+	m := &parser.Module{
+		Type: "cc_test",
+		Map: &parser.Map{Properties: []*parser.Property{
+			{Name: "name", Value: &parser.String{Value: "foo_test"}},
+			{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+				&parser.String{Value: "foo_test.c"},
+			}}},
+			{Name: "test_options", Value: &parser.Map{Properties: []*parser.Property{
+				{Name: "args", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "--gtest_filter=Foo.*"},
+				}}},
+			}}},
+		}},
+	}
+	edge := r.NinjaEdge(m, DefaultRuleRenderContext())
+	if !strings.Contains(edge, "test_args = --gtest_filter=Foo.*") {
+		t.Fatalf("Expected cc_test test_args, got: %s", edge)
+	}
+}
+
+func TestJavaTestIncludesTestOptionsArgs(t *testing.T) {
+	r := &javaTest{}
+	m := &parser.Module{
+		Type: "java_test",
+		Map: &parser.Map{Properties: []*parser.Property{
+			{Name: "name", Value: &parser.String{Value: "foo_test"}},
+			{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+				&parser.String{Value: "FooTest.java"},
+			}}},
+			{Name: "test_options", Value: &parser.Map{Properties: []*parser.Property{
+				{Name: "args", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "--tests=FooTest"},
+				}}},
+			}}},
+		}},
+	}
+	edge := r.NinjaEdge(m, DefaultRuleRenderContext())
+	if !strings.Contains(edge, "test_args = --tests=FooTest") {
+		t.Fatalf("Expected java_test test_args, got: %s", edge)
 	}
 }
 

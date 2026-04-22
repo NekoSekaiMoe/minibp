@@ -178,6 +178,8 @@ func (p *Parser) parseModule(typeName string, typePos scanner.Position) (*Module
 	archProps := make(map[string]*Map)
 	var hostProps *Map
 	var targetProps *Map
+	multilibProps := make(map[string]*Map)
+	var overrideFound bool
 	var filteredProps []*Property
 	for _, prop := range propertyList {
 		switch prop.Name {
@@ -205,17 +207,35 @@ func (p *Parser) parseModule(typeName string, typePos scanner.Position) (*Module
 				return nil, fmt.Errorf("%s: expected map value for 'target' override", prop.ColonPos)
 			}
 			targetProps = m
+		case "multilib":
+			mlMap, ok := prop.Value.(*Map)
+			if !ok {
+				return nil, fmt.Errorf("%s: expected map value for 'multilib' override", prop.ColonPos)
+			}
+			for _, mp := range mlMap.Properties {
+				mlInner, ok := mp.Value.(*Map)
+				if !ok {
+					return nil, fmt.Errorf("%s: expected map value for multilib override '%s'", mp.ColonPos, mp.Name)
+				}
+				multilibProps[mp.Name] = mlInner
+			}
+		case "override":
+			if b, ok := prop.Value.(*Bool); ok {
+				overrideFound = b.Value
+			}
 		default:
 			filteredProps = append(filteredProps, prop)
 		}
 	}
 	mod := &Module{
-		Type:    typeName,
-		TypePos: typePos,
-		Map:     &Map{Properties: filteredProps, LBracePos: lbracePos, RBracePos: rbracePos},
-		Arch:    archProps,
-		Host:    hostProps,
-		Target:  targetProps,
+		Type:     typeName,
+		TypePos:  typePos,
+		Map:      &Map{Properties: filteredProps, LBracePos: lbracePos, RBracePos: rbracePos},
+		Arch:     archProps,
+		Host:     hostProps,
+		Target:   targetProps,
+		Multilib: multilibProps,
+		Override: overrideFound,
 	}
 
 	return mod, nil

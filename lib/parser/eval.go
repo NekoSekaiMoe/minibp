@@ -572,6 +572,30 @@ func (e *Evaluator) evalSelectCondition(cond ConfigurableCondition) interface{} 
 		return nil
 	}
 
+	// Handle variant(name)
+	if cond.FunctionName == "variant" {
+		if len(cond.Args) == 0 {
+			return e.config["variant"]
+		}
+		name := e.Eval(cond.Args[0])
+		if nameStr, ok := name.(string); ok && nameStr != "" {
+			return e.config["variant."+nameStr]
+		}
+		return nil
+	}
+
+	// Handle product_variable(name)
+	if cond.FunctionName == "product_variable" {
+		if len(cond.Args) == 0 {
+			return e.config["product"]
+		}
+		name := e.Eval(cond.Args[0])
+		if nameStr, ok := name.(string); ok && nameStr != "" {
+			return e.config["product."+nameStr]
+		}
+		return nil
+	}
+
 	if len(cond.Args) == 0 {
 		if val, ok := e.vars[cond.FunctionName]; ok {
 			return val

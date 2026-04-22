@@ -471,7 +471,9 @@ func (g *Generator) Generate(w io.Writer) error {
 					if strings.HasPrefix(m.Type, "java_") {
 						edgeDef = g.addJavaDepsToEdge(m, edgeDef)
 					}
+					edgeDef = g.addDataDepsToEdge(m, edgeDef, archCtx)
 					edgeDef = g.addIncludesToEdge(edgeDef, includes)
+					edgeDef += g.distEdgesForModule(m, archCtx)
 				}
 
 				for _, out := range collectBuildOutputs(edgeDef) {
@@ -854,6 +856,147 @@ func (g *Generator) addJavaDepsToEdge(m *parser.Module, edge string) string {
 	return strings.Join(lines, "\n")
 }
 
+func (g *Generator) moduleDataOutputs(m *parser.Module, ctx RuleRenderContext) []string {
+	data := getData(m)
+	if len(data) == 0 {
+		return nil
+	}
+
+	var outputs []string
+	seen := make(map[string]bool)
+	for _, item := range data {
+		if ref := ParseModuleReference(item); ref != nil {
+			for _, out := range ResolveModuleOutputs(ref, g.modules, ctx) {
+				if !seen[out] {
+					seen[out] = true
+					outputs = append(outputs, out)
+				}
+			}
+			continue
+		}
+		if !seen[item] {
+			seen[item] = true
+			outputs = append(outputs, item)
+		}
+	}
+	return outputs
+}
+
+func (g *Generator) addDataDepsToEdge(m *parser.Module, edge string, ctx RuleRenderContext) string {
+	dataOutputs := g.moduleDataOutputs(m, ctx)
+	if len(dataOutputs) == 0 {
+		return edge
+	}
+
+	lines := strings.Split(edge, "\n")
+	for i, line := range lines {
+		parsed, ok := parseBuildLine(line)
+		if !ok {
+			continue
+		}
+		for _, dep := range dataOutputs {
+			already := false
+			for _, existing := range parsed.Deps {
+				if ninjaUnescape(existing) == dep {
+					already = true
+					break
+				}
+			}
+			if !already {
+				parsed.Deps = append(parsed.Deps, ninjaEscapePath(dep))
+			}
+		}
+
+		buildLine := "build " + strings.Join(parsed.Outputs, " ") + ": " + ninjaEscapePath(parsed.Rule)
+		if len(parsed.Inputs) > 0 {
+			buildLine += " " + strings.Join(parsed.Inputs, " ")
+		}
+		if len(parsed.Deps) > 0 {
+			buildLine += " | " + strings.Join(parsed.Deps, " ")
+		}
+		lines[i] = buildLine
+	}
+	return strings.Join(lines, "\n")
+}
+
+func getDistSpecs(m *parser.Module) []*parser.Map {
+	var specs []*parser.Map
+	if dist := GetMapProp(m, "dist"); dist != nil {
+		specs = append(specs, dist)
+	}
+	if m.Map == nil {
+		return specs
+	}
+	for _, prop := range m.Map.Properties {
+		if prop.Name != "dists" {
+			continue
+		}
+		list, ok := prop.Value.(*parser.List)
+		if !ok {
+			continue
+		}
+		for _, item := range list.Values {
+			if mp, ok := item.(*parser.Map); ok {
+				specs = append(specs, mp)
+			}
+		}
+	}
+	return specs
+}
+
+func distSpecString(spec *parser.Map, key string) string {
+	if spec == nil {
+		return ""
+	}
+	for _, prop := range spec.Properties {
+		if prop.Name == key {
+			if s, ok := prop.Value.(*parser.String); ok {
+				return s.Value
+			}
+		}
+	}
+	return ""
+}
+
+func (g *Generator) distEdgesForModule(m *parser.Module, ctx RuleRenderContext) string {
+	specs := getDistSpecs(m)
+	if len(specs) == 0 {
+		return ""
+	}
+	rule := g.rules[m.Type]
+	if rule == nil {
+		return ""
+	}
+	outputs := rule.Outputs(m, ctx)
+	if len(outputs) == 0 {
+		return ""
+	}
+
+	var edges strings.Builder
+	for _, spec := range specs {
+		dir := distSpecString(spec, "dir")
+		dest := distSpecString(spec, "dest")
+		suffix := distSpecString(spec, "suffix")
+		baseDir := "dist"
+		if dir != "" {
+			baseDir = filepath.ToSlash(filepath.Join(baseDir, dir))
+		}
+		for i, out := range outputs {
+			target := filepath.Base(out)
+			if dest != "" && i == 0 {
+				target = dest
+			} else if suffix != "" {
+				ext := filepath.Ext(target)
+				base := strings.TrimSuffix(target, ext)
+				target = base + suffix + ext
+			}
+			distOut := filepath.ToSlash(filepath.Join(baseDir, target))
+			edges.WriteString(fmt.Sprintf("build %s: prebuilt_copy %s\n", ninjaEscapePath(distOut), ninjaEscapePath(out)))
+		}
+	}
+	return edges.String()
+}
+
 // adjustPaths updates paths in ninja edge to be relative to output directory
 func (g *Generator) shouldPrefixInputPath(path string) bool {
 	return !strings.HasPrefix(path, "$") &&
@@ -981,7 +1124,24 @@ func (g *Generator) collectUsedModuleTypes() []string {
 		}
 	}
 
+	if g.hasDistTargets() && !seen["prebuilt_etc"] {
+		seen["prebuilt_etc"] = true
+		result = append(result, "prebuilt_etc")
+	}
+
 	return result
+}
+
+func (g *Generator) hasDistTargets() bool {
+	for _, m := range g.modules {
+		if m == nil {
+			continue
+		}
+		if len(getDistSpecs(m)) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // collectRulesForModule returns all ninja rule names used by a build rule

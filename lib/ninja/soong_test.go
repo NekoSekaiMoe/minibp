@@ -42,6 +42,43 @@ func TestDefaultsModule(t *testing.T) {
 	}
 }
 
+func TestTypedDefaultsModule(t *testing.T) {
+	r := &defaultsModule{typeName: "cc_defaults"}
+	if r.Name() != "cc_defaults" {
+		t.Fatalf("Expected cc_defaults, got %s", r.Name())
+	}
+
+	modules := map[string]*parser.Module{
+		"cc_base": {
+			Type: "cc_defaults",
+			Map: &parser.Map{
+				Properties: []*parser.Property{
+					{Name: "name", Value: &parser.String{Value: "cc_base"}},
+					{Name: "cflags", Value: &parser.List{Values: []parser.Expression{
+						&parser.String{Value: "-Wall"},
+					}}},
+				},
+			},
+		},
+		"app": {
+			Type: "cc_binary",
+			Map: &parser.Map{
+				Properties: []*parser.Property{
+					{Name: "name", Value: &parser.String{Value: "app"}},
+					{Name: "defaults", Value: &parser.List{Values: []parser.Expression{
+						&parser.String{Value: "cc_base"},
+					}}},
+				},
+			},
+		},
+	}
+
+	ApplyDefaults(modules["app"], modules)
+	if got := GetListProp(modules["app"], "cflags"); len(got) != 1 || got[0] != "-Wall" {
+		t.Fatalf("Expected typed defaults cflags to apply, got %v", got)
+	}
+}
+
 // TestPackageModule tests that package modules are recognized
 func TestPackageModule(t *testing.T) {
 	r := &packageModule{}
@@ -339,5 +376,66 @@ func TestProtoLibraryRuleOutputs(t *testing.T) {
 	}
 	if !strings.HasSuffix(outs[0], ".pb.h") || !strings.HasSuffix(outs[1], ".pb.cc") {
 		t.Errorf("Expected .pb.h and .pb.cc outputs, got %v", outs)
+	}
+}
+
+func TestGenruleMultipleOutputs(t *testing.T) {
+	r := &genrule{}
+	m := &parser.Module{
+		Type: "genrule",
+		Map: &parser.Map{
+			Properties: []*parser.Property{
+				{Name: "name", Value: &parser.String{Value: "generate"}},
+				{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "input.txt"},
+				}}},
+				{Name: "outs", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "out/a.txt"},
+					&parser.String{Value: "out/b.txt"},
+				}}},
+				{Name: "cmd", Value: &parser.String{Value: "touch $out"}},
+			},
+		},
+	}
+
+	edge := r.NinjaEdge(m, DefaultRuleRenderContext())
+	if !strings.Contains(edge, "build out/a.txt out/b.txt: genrule_command input.txt") {
+		t.Fatalf("Expected multi-output genrule edge, got: %s", edge)
+	}
+}
+
+func TestPrebuiltRules(t *testing.T) {
+	ctx := DefaultRuleRenderContext()
+
+	etc := &prebuiltEtcRule{typeName: "prebuilt_etc", subdir: "etc"}
+	etcMod := &parser.Module{
+		Type: "prebuilt_etc",
+		Map: &parser.Map{
+			Properties: []*parser.Property{
+				{Name: "name", Value: &parser.String{Value: "cfg"}},
+				{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "configs/app.conf"},
+				}}},
+			},
+		},
+	}
+	if got := etc.Outputs(etcMod, ctx); len(got) != 1 || got[0] != "etc/app.conf" {
+		t.Fatalf("Expected etc/app.conf, got %v", got)
+	}
+
+	lib := &prebuiltLibraryRule{typeName: "cc_prebuilt_library_shared", ext: ".so"}
+	libMod := &parser.Module{
+		Type: "cc_prebuilt_library_shared",
+		Map: &parser.Map{
+			Properties: []*parser.Property{
+				{Name: "name", Value: &parser.String{Value: "foo"}},
+				{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "prebuilts/libfoo.so"},
+				}}},
+			},
+		},
+	}
+	if got := lib.Outputs(libMod, ctx); len(got) != 1 || got[0] != "libfoo.so" {
+		t.Fatalf("Expected libfoo.so, got %v", got)
 	}
 }
