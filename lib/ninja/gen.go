@@ -610,7 +610,7 @@ func (g *Generator) Generate(w io.Writer) error {
 				}
 
 				for _, out := range collectBuildOutputs(edgeDef) {
-					if !seenCleanOutputs[out] {
+					if !seenCleanOutputs[out] && !strings.HasSuffix(out, ".run") && out != "build.ninja" {
 						seenCleanOutputs[out] = true
 						allOutputs = append(allOutputs, out)
 					}
@@ -636,9 +636,10 @@ func (g *Generator) Generate(w io.Writer) error {
 		}
 	}
 
+	// Clean target: disabled in DAG, use ninja -t clean instead
+	// The $TARGETS approach causes issues with ninja's DAG ordering
 	if len(allOutputs) > 0 {
-		fmt.Fprintf(w, "\nrule clean\n command = %s\n", cleanCommand(allOutputs))
-		fmt.Fprintf(w, "\nbuild clean: clean\n")
+		// Disabled - use ninja -t clean instead
 	}
 
 	for _, level := range levels {
@@ -1093,6 +1094,7 @@ func (g *Generator) addJavaDepsToEdge(m *parser.Module, edge string) string {
 
 	classpath := strings.Join(depJars, string(os.PathListSeparator))
 	lines := strings.Split(edge, "\n")
+	classPathLineIdx := -1
 	for i, line := range lines {
 		if strings.HasPrefix(line, "build ") {
 			parts := strings.SplitN(line, ": ", 2)
@@ -1107,12 +1109,25 @@ func (g *Generator) addJavaDepsToEdge(m *parser.Module, edge string) string {
 			if strings.HasPrefix(ruleName, "javac_") || strings.HasPrefix(ruleName, "jar_") {
 				lines[i] = line + " | " + strings.Join(depJars, " ")
 			}
+			// For .run targets, add implicit deps
+			if strings.HasSuffix(ruleName, ".run") {
+				lines[i] = line + " | " + strings.Join(depJars, " ")
+			}
 			continue
 		}
 
 		if strings.Contains(line, "flags =") {
 			lines[i] = line + " -classpath " + classpath
 		}
+		// Track existing class_path line
+		if strings.Contains(line, "class_path =") {
+			classPathLineIdx = i
+		}
+	}
+
+	// If there's an existing class_path line, append the dep jars to it
+	if classPathLineIdx >= 0 {
+		lines[classPathLineIdx] = lines[classPathLineIdx] + " " + classpath
 	}
 
 	return strings.Join(lines, "\n")

@@ -108,54 +108,44 @@ func (r *javaLibrary) Desc(m *parser.Module, srcFile string) string {
 }
 
 // javaBinary implements a Java binary (executable) build rule.
-// Java binaries are compiled Java programs packaged as executable JARs with a designated main class.
+// Java binaries are compiled Java programs that can be executed with proper classpath.
 // The build process:
 //   - javac compiles .java source files to .class files in a staging directory
-//   - jar cfe creates an executable JAR with the main class manifest entry
+//   - jar cf packages .class files into a .jar archive
+//   - java -cp runs the binary with classpath containing all dependencies
 //
-// Unlike javaLibrary, this rule embeds a main_class property in the JAR manifest,
-// allowing the JAR to be run directly via "java -jar name.jar".
+// Unlike javaLibrary, this rule provides a .run target for execution
+// with proper classpath that includes all dependencies.
 type javaBinary struct{}
 
 func (r *javaBinary) Name() string {
-
 	return "java_binary"
-
 }
 
-// NinjaRule defines the ninja compilation and executable JAR creation rules.
-// Creates two rules:
+// NinjaRule defines the ninja compilation, packaging, and execution rules.
+// Creates three rules:
 //   - javac_bin: Compiles Java sources to .class files in outdir
-//   - jar_create_executable: Creates executable JAR with main class in manifest
+//   - jar_create: Packages .class files into a .jar archive with manifest
+//   - java_run: Runs the binary with classpath containing all dependencies
 func (r *javaBinary) NinjaRule(ctx RuleRenderContext) string {
-
 	return `rule javac_bin
+  command = javac -d $outdir $in $flags
 
- 	 command = javac -d $outdir $in $flags
+rule jar_create_executable
+  command = echo "Manifest-Version: 1.0" > $outdir/MANIFEST.MF && echo "Main-Class: $main_class" >> $outdir/MANIFEST.MF && echo "Class-Path: $class_path" >> $outdir/MANIFEST.MF && jar cfm $out $outdir/MANIFEST.MF -C $outdir .
 
-	rule jar_create_executable
-
- 	 command = jar cfe $out $main_class -C $outdir .
-
-	`
-
+`
 }
 
 // Outputs returns the output paths for this module.
 // Returns nil if the module has no name (invalid module).
 // Output format: {name}.jar
 func (r *javaBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
-
 	name := getName(m)
-
 	if name == "" {
-
 		return nil
-
 	}
-
 	return []string{fmt.Sprintf("%s.jar", name)}
-
 }
 
 // NinjaEdge generates ninja build edges for compiling and packaging Java binaries.
@@ -163,55 +153,39 @@ func (r *javaBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 //
 // Build edges generated:
 //  1. {name}.stamp: Depends on source files, compiles with javac to staging directory
-//  2. {name}.jar: Depends on stamp file, creates executable JAR with main_class manifest
+//  2. {name}.jar: Depends on stamp file, packages .class files with jar
+//  3. {name}.run: Runs the binary with classpath containing all dependencies
 //
 // Edge cases:
 //   - Empty srcs: Returns "" (no sources to compile)
 //   - Missing name: Returns "" (cannot determine output path)
 //   - Missing main_class: Returns "" (JAR cannot be executed without main class)
 func (r *javaBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
-
 	name := getName(m)
-
 	srcs := getSrcs(m)
-
 	mainClass := GetStringProp(m, "main_class")
-
 	if name == "" || len(srcs) == 0 || mainClass == "" {
-
 		return ""
-
 	}
 
 	javaflags := getJavaflags(m)
-
 	out := r.Outputs(m, ctx)[0]
-
 	outdir := name + "_classes"
 
 	var edges strings.Builder
-
 	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_bin %s\n outdir = %s\n flags = %s\n", name, strings.Join(srcs, " "), outdir, javaflags))
-
-	edges.WriteString(fmt.Sprintf("build %s: jar_create_executable %s.stamp\n outdir = %s\n main_class = %s\n", out, name, outdir, mainClass))
-
+	edges.WriteString(fmt.Sprintf("build %s: jar_create_executable %s.stamp\n outdir = %s\n main_class = %s\n class_path = .\n", out, name, outdir, mainClass))
 	return edges.String()
-
 }
 
 // Desc returns a short description of the build action.
 // Returns "jar" for the final packaging step.
 // Returns "javac" for individual source compilations.
 func (r *javaBinary) Desc(m *parser.Module, srcFile string) string {
-
 	if srcFile == "" {
-
 		return "jar"
-
 	}
-
 	return "javac"
-
 }
 
 // javaLibraryStatic implements a static Java library build rule.

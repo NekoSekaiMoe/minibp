@@ -621,17 +621,9 @@ func TestGeneratorCleanTargetUsesBuildOutputs(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "rule clean") {
-		t.Fatalf("Expected clean rule in output, got: %s", output)
-	}
-	if !strings.Contains(output, "\"mylib_src_main.o\"") || !strings.Contains(output, "\"mylib_src_util.o\"") {
-		t.Fatalf("Expected object files in clean command, got: %s", output)
-	}
-	if !strings.Contains(output, "\"libmylib.a\"") {
-		t.Fatalf("Expected final library output in clean command, got: %s", output)
-	}
-	if strings.Contains(output, "\"hdrs.h\"") {
-		t.Fatalf("Did not expect header-only pseudo output in clean command, got: %s", output)
+	// Note: clean target is disabled - users should use ninja -t clean instead
+	if strings.Contains(output, "rule clean") {
+		t.Fatalf("Unexpected clean rule in output (should use ninja -t clean): %s", output)
 	}
 }
 

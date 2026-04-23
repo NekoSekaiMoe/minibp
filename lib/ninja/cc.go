@@ -116,24 +116,19 @@ func (r *ccLibrary) Name() string { return "cc_library" }
 // Returns:
 //   - Ninja rule definitions as formatted string
 func (r *ccLibrary) NinjaRule(ctx RuleRenderContext) string {
-	arCmd := ltoArchiveCmd(ctx.AR, ctx.Lto)
-	ltoCompile, ltoLink := ltoFlags(ctx.Lto)
-
-	rules := fmt.Sprintf(`rule cc_compile
- command = %s -c $in -o $out $flags -MMD -MF $out.d
- depfile = $out.d
- deps = gcc
-
-rule cc_compile_lto
- command = %s -c $in -o $out $flags -MMD -MF $out.d
- depfile = $out.d
- deps = gcc
-
-rule cc_archive
- command = %s rcs $out @$out.rsp
- rspfile = $out.rsp
- rspfile_content = $in
- restat = true
+		arCmd := ltoArchiveCmd(ctx.AR, ctx.Lto)
+		ltoCompile, ltoLink := ltoFlags(ctx.Lto)
+		rules := fmt.Sprintf(`rule cc_compile
+	command = %s -c $in -o $out $flags -MMD -MF $out.d
+	depfile = $out.d
+	deps = gcc
+	rule cc_compile_lto
+	command = %s -c $in -o $out $flags -MMD -MF $out.d
+	depfile = $out.d
+	deps = gcc
+	rule cc_archive
+	command = %s rcs $out $in
+	restat = true
 
 rule cc_shared
  command = ${CC} -shared -o $out @$out.rsp $flags
@@ -272,21 +267,16 @@ func (r *ccLibraryStatic) Name() string { return "cc_library_static" }
 func (r *ccLibraryStatic) NinjaRule(ctx RuleRenderContext) string {
 	arCmd := ltoArchiveCmd(ctx.AR, ctx.Lto)
 	return fmt.Sprintf(`rule cc_compile
- command = %s -c $in -o $out $flags -MMD -MF $out.d
- depfile = $out.d
- deps = gcc
-
+command = %s -c $in -o $out $flags -MMD -MF $out.d
+depfile = $out.d
+deps = gcc
 rule cc_compile_lto
- command = %s -c $in -o $out $flags -MMD -MF $out.d
- depfile = $out.d
- deps = gcc
-
+command = %s -c $in -o $out $flags -MMD -MF $out.d
+depfile = $out.d
+deps = gcc
 rule cc_archive
- command = %s rcs $out @$out.rsp
- rspfile = $out.rsp
- rspfile_content = $in
- restat = true
-
+command = %s rcs $out $in
+restat = true
 `, ccCompilerCmd(ctx, "cc"), ccCompilerCmd(ctx, "cc"), arCmd)
 }
 
@@ -587,36 +577,27 @@ func (r *ccBinary) NinjaRule(ctx RuleRenderContext) string {
 	if ltoLink != "" {
 		linkSuffix = " " + ltoLink
 	}
-
 	return fmt.Sprintf(`rule cc_compile
- command = %s -c $in -o $out $flags -MMD -MF $out.d
- depfile = $out.d
- deps = gcc
-
+command = %s -c $in -o $out $flags -MMD -MF $out.d
+depfile = $out.d
+deps = gcc
 rule cc_compile_lto
- command = %s -c $in -o $out $flags -MMD -MF $out.d
- depfile = $out.d
- deps = gcc
-
+command = %s -c $in -o $out $flags -MMD -MF $out.d
+depfile = $out.d
+deps = gcc
 rule cc_link
- command = ${CC} -o $out @$out.rsp $flags%s
- rspfile = $out.rsp
- rspfile_content = $in
-
+command = ${CC} -o $out @$out.rsp $flags%s
+rspfile = $out.rsp
+rspfile_content = $in
 rule cc_link_lto
- command = ${CC} -o $out $in $flags%s
-
+command = ${CC} -o $out $in $flags%s
 rule cc_archive
- command = %s rcs $out @$out.rsp
- rspfile = $out.rsp
- rspfile_content = $in
- restat = true
-
+command = %s rcs $out $in
+restat = true
 rule thinlto_codegen
- command = %s -flto=thin -c -fthin-link=$out.thinlto.o $in -o $out %s
-
-`, ccCompilerCmd(ctx, "cc"), ccCompilerCmd(ctx, "cc"), linkSuffix, linkSuffix,
-		arCmd, ccCompilerCmd(ctx, "cc"), "")
+command = %s -flto=thin -c -fthin-link=$out.thinlto.o $in -o $out
+%s
+`, ccCompilerCmd(ctx, "cc"), ccCompilerCmd(ctx, "cc"), linkSuffix, linkSuffix, arCmd, ccCompilerCmd(ctx, "cc"), "")
 }
 
 func (r *ccBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
