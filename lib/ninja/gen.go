@@ -46,12 +46,12 @@ type Graph interface {
 // It orchestrates the translation from high-level module definitions
 // to low-level Ninja build rules and edges.
 type Generator struct {
-	graph      Graph                     // Dependency graph for topological sorting
-	rules      map[string]BuildRule      // Map of rule name to rule implementation
-	modules    map[string]*parser.Module // All modules in the build
-	sourceDir  string                    // Source directory where .bp files are located
-	outputDir  string                    // Output directory where ninja runs
-	pathPrefix string                    // Prefix to prepend to source file paths
+	graph      Graph
+	rules      map[string]BuildRule
+	modules    map[string]*parser.Module
+	sourceDir  string
+	outputDir  string
+	pathPrefix string
 	regenCmd   string                    // Command to regenerate build.ninja
 	inputFiles []string                  // Files that trigger regeneration
 	outputFile string                    // Output file for regeneration rule
@@ -59,6 +59,7 @@ type Generator struct {
 	toolchain  Toolchain                 // Compiler toolchain configuration
 	arch       string                    // Target architecture
 	multilib   []string                  // Multi-arch targets (e.g. ["arm64","x86_64"])
+	targetOS  string                    // Target operating system (e.g., "linux", "darwin", "windows")
 }
 
 // Toolchain holds compiler/tool configuration for cross-compilation.
@@ -169,6 +170,10 @@ func (g *Generator) SetArch(arch string) {
 //   - archs: List of architectures to build for
 func (g *Generator) SetMultilib(archs []string) {
 	g.multilib = archs
+}
+
+func (g *Generator) SetTargetOS(os string) {
+	g.targetOS = os
 }
 
 // archsForModule returns the list of architectures to build for a given module.
@@ -703,7 +708,7 @@ func (g *Generator) Generate(w io.Writer) error {
 			if !ok {
 				continue
 			}
-			outputs := rule.Outputs(m, g.ruleRenderContext())
+			outputs := rule.Outputs(m, g.ruleRenderContextForArch(g.arch))
 			if len(outputs) == 0 {
 				continue // Skip modules without outputs (e.g. headers, custom)
 			}
@@ -781,21 +786,6 @@ func (g *Generator) ruleRenderContext() RuleRenderContext {
 	return g.ruleRenderContextForArch(g.arch)
 }
 
-// ruleRenderContextForArch returns the rule render context for a specific architecture.
-// It combines toolchain settings with architecture-specific flags to create
-// a complete context for rendering ninja rules.
-//
-// Parameters:
-//   - arch: Target architecture name
-//
-// Returns:
-//   - RuleRenderContext with all toolchain and flags configured
-//
-// Algorithm:
-//  1. Apply defaults if toolchain paths are empty
-//  2. Append architecture-specific flags
-//  3. Set architecture suffix for output files
-//  4. Add sysroot flag if configured
 func (g *Generator) ruleRenderContextForArch(arch string) RuleRenderContext {
 	tc := g.toolchain
 	if tc.CC == "" {
@@ -827,6 +817,14 @@ func (g *Generator) ruleRenderContextForArch(arch string) RuleRenderContext {
 		sysrootFlag := "--sysroot=" + ctx.Sysroot
 		ctx.CFlags = strings.TrimSpace(ctx.CFlags + " " + sysrootFlag)
 		ctx.LdFlags = strings.TrimSpace(ctx.LdFlags + " " + sysrootFlag)
+	}
+	if g.targetOS != "" {
+		ctx.GOOS = g.targetOS
+	}
+	if arch != "" {
+		ctx.GOARCH = arch
+	} else {
+		ctx.GOARCH = g.arch
 	}
 	return ctx
 }

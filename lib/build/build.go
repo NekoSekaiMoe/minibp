@@ -39,6 +39,7 @@ type Options struct {
 	LTO      string   // Link-time optimization setting ("thin", "full", or empty for none)
 	Sysroot  string   // Sysroot path for toolchain (e.g., "/opt/ios-sdk")
 	Ccache   string   // Ccache setting ("no" to disable, or path to ccache binary)
+	TargetOS string   // Target operating system (e.g., "linux", "darwin", "windows")
 }
 
 // Graph represents a dependency graph of modules used for ninja build generation.
@@ -420,6 +421,7 @@ func NewGenerator(graph *Graph, modules map[string]*parser.Module, opts Options)
 	gen.SetWorkDir(opts.SrcDir)
 	gen.SetToolchain(toolchainFromOptions(opts))
 	gen.SetArch(opts.Arch)
+	gen.SetTargetOS(opts.TargetOS)
 	// Configure multilib for multi-architecture builds (e.g., arm64-v8a + armeabi-v7a).
 	if len(opts.Multilib) > 0 {
 		gen.SetMultilib(opts.Multilib)

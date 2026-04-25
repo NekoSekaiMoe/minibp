@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"minibp/lib/parser"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -86,7 +87,17 @@ func (r *goLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	variants := getGoTargetVariants(m)
 	if len(variants) == 0 {
-		return r.ninjaEdgeForVariant(m, ctx, "", "")
+		goos := ctx.GOOS
+		goarch := ctx.GOARCH
+		if goarch == "" {
+			goarch = runtime.GOARCH
+		}
+		isCrossCompile := goos != "" && goos != runtime.GOOS
+		if !isCrossCompile {
+			goos = ""
+			goarch = ""
+		}
+		return r.ninjaEdgeForVariant(m, ctx, goos, goarch)
 	}
 
 	var edges strings.Builder
@@ -220,7 +231,18 @@ func (r *goBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	variants := getGoTargetVariants(m)
 	if len(variants) == 0 {
-		return r.ninjaEdgeForVariant(m, ctx, "", "")
+		goos := ctx.GOOS
+		goarch := ctx.GOARCH
+		isCrossCompile := goos != "" && goos != runtime.GOOS
+		// Cross-compile when GOARCH is different from runtime
+		if !isCrossCompile && goarch != "" && goarch != runtime.GOARCH {
+			isCrossCompile = true
+		}
+		if !isCrossCompile {
+			goos = ""
+			goarch = ""
+		}
+		return r.ninjaEdgeForVariant(m, ctx, goos, goarch)
 	}
 
 	var edges strings.Builder
@@ -271,17 +293,26 @@ func (r *goBinary) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext, 
 			parts = append(parts, "GOARCH="+goarch)
 		}
 		envVar = strings.Join(parts, " ")
+		if goos == "" {
+			goos = runtime.GOOS
+		}
+		if goarch == "" {
+			goarch = runtime.GOARCH
+		}
 		suffix = "_" + goos + "_" + goarch
 	}
 
 	out := name + suffix
 
-	// Convert dependency module references to archive file names.
-	// Format: ":modulename" -> "modulename.a"
+	// Convert dependency module references to archive file names with suffix.
+	depSuffix := ""
+	if goos != "" || goarch != "" {
+		depSuffix = "_" + goos + "_" + goarch
+	}
 	var libFiles []string
 	for _, dep := range deps {
 		depName := strings.TrimPrefix(dep, ":")
-		libFiles = append(libFiles, depName+".a")
+		libFiles = append(libFiles, depName+depSuffix+".a")
 	}
 
 	srcStr := strings.Join(srcs, " ")
@@ -369,7 +400,17 @@ func (r *goTest) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	variants := getGoTargetVariants(m)
 	if len(variants) == 0 {
-		return r.ninjaEdgeForVariant(m, ctx, "", "")
+		goos := ctx.GOOS
+		goarch := ctx.GOARCH
+		if goarch == "" {
+			goarch = runtime.GOARCH
+		}
+		isCrossCompile := goos != "" && goos != runtime.GOOS
+		if !isCrossCompile {
+			goos = ""
+			goarch = ""
+		}
+		return r.ninjaEdgeForVariant(m, ctx, goos, goarch)
 	}
 
 	var edges strings.Builder
@@ -453,8 +494,17 @@ func (r *goTest) Desc(m *parser.Module, srcFile string) string {
 // This suffix is used to differentiate outputs when cross-compiling for multiple targets.
 // Example: "linux_amd64", "darwin_arm64", "windows_386"
 func goVariantSuffix(m *parser.Module, ctx RuleRenderContext) string {
-	if ctx.GOOS != "" && ctx.GOARCH != "" {
-		return "_" + ctx.GOOS + "_" + ctx.GOARCH
+	goos := ctx.GOOS
+	goarch := ctx.GOARCH
+	isCrossCompile := (goarch != "" && goarch != runtime.GOARCH) || (goos != "" && goos != runtime.GOOS)
+	if !isCrossCompile {
+		return ""
 	}
-	return ""
+	if goarch == "" {
+		goarch = runtime.GOARCH
+	}
+	if goos == "" {
+		goos = runtime.GOOS
+	}
+	return "_" + goos + "_" + goarch
 }

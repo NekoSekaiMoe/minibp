@@ -251,6 +251,7 @@ func (cfg RunConfig) BuildOptions() buildlib.Options {
 		LTO:      cfg.LTO,
 		Sysroot:  cfg.Sysroot,
 		Ccache:   cfg.Ccache,
+		TargetOS: cfg.TargetOS,
 	}
 }
 
