@@ -1,5 +1,12 @@
 // Example Blueprint file for minibp
-// This demonstrates all 7 supported module types
+// This demonstrates some supported module types
+// ============================================================================
+// Common flags
+// ============================================================================
+
+common_flags = ["-ggdb3", "-O0"]
+debug_flags = common_flags + ["-DDEBUG"]
+
 // ============================================================================
 // C/C++ Modules
 // ============================================================================

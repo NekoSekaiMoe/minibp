@@ -624,10 +624,10 @@ func TestGeneratorCleanTargetUsesBuildOutputs(t *testing.T) {
 	if !strings.Contains(output, "build all: phony") {
 		t.Fatalf("Expected all target in output: %s", output)
 	}
-	if !strings.Contains(output, "build clean: clean") {
+	if !strings.Contains(output, "build clean: ninja_clean") {
 		t.Fatalf("Expected clean target in output: %s", output)
 	}
-	if !strings.Contains(output, "rule clean") {
+	if !strings.Contains(output, "rule ninja_clean") {
 		t.Fatalf("Expected clean rule in output: %s", output)
 	}
 }
@@ -802,7 +802,8 @@ func TestCCSharedLibraryIncludesSharedDeps(t *testing.T) {
 	}
 
 	edge := r.NinjaEdge(m, DefaultRuleRenderContext())
-	if !strings.Contains(edge, "build libapp.so: cc_shared app_app.o libbase.so") {
+	// When module name equals src basename, objectOutputName returns "app.o" not "app_app.o"
+	if !strings.Contains(edge, "build libapp.so: cc_shared app.o libbase.so") {
 		t.Fatalf("Expected shared library input dependency in edge, got: %s", edge)
 	}
 	if !strings.Contains(edge, "-lbase") {
@@ -918,7 +919,8 @@ func TestGeneratorAddsIncludesFromSharedLibs(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "build app_app.o: cc_compile app.c") {
+	// When module name equals src basename, objectOutputName returns "app.o" not "app_app.o"
+	if !strings.Contains(output, "build app.o: cc_compile app.c") {
 		t.Fatalf("Expected app compile edge in output, got: %s", output)
 	}
 	if !strings.Contains(output, "-Iinclude/base") {
@@ -947,10 +949,11 @@ func TestCCBinarySeparatesCompileAndLinkFlags(t *testing.T) {
 	}
 
 	edge := r.NinjaEdge(m, DefaultRuleRenderContext())
-	if !strings.Contains(edge, "build app_app.o: cc_compile app.c\n flags = -O2\n") {
+	// When module name equals src basename, objectOutputName returns "app.o"
+	if !strings.Contains(edge, "build app.o: cc_compile app.c\n flags = -O2\n") {
 		t.Fatalf("Expected compile edge to use only cflags, got: %s", edge)
 	}
-	if !strings.Contains(edge, "build app: cc_link app_app.o libbase.so\n flags = -pthread -lbase\n") {
+	if !strings.Contains(edge, "build app: cc_link app.o libbase.so\n flags = -pthread -lbase\n") {
 		t.Fatalf("Expected link edge to use only ldflags plus shared libs, got: %s", edge)
 	}
 	if strings.Contains(edge, "cc_link app_app.o libbase.so\n flags = -O2") {
@@ -1297,13 +1300,16 @@ func TestGeneratorPreservesNativeLinkInputsForExternalNinja(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "build app: cc_link app_app.o ../examples/libbase.so") {
+	// When module name equals src basename, objectOutputName returns "app.o" not "app_app.o"
+	if !strings.Contains(output, "build app: cc_link app.o ../examples/libbase.so") {
 		t.Fatalf("Expected shared library link input to be rewritten for external ninja, got: %s", output)
 	}
-	if strings.Contains(output, "build app: cc_link app_app.o libbase.so") {
+	// When module name equals src basename, objectOutputName returns "app.o" not "app_app.o"
+	if strings.Contains(output, "build app: cc_link app.o libbase.so") {
 		t.Fatalf("Expected external ninja to avoid source-tree-relative shared library inputs, got: %s", output)
 	}
-	if !strings.Contains(output, "build libbase.so: cc_shared base_base.o") {
+	// For base module with src name "base.c", objectOutputName returns "base.o"
+	if !strings.Contains(output, "build libbase.so: cc_shared base.o") {
 		t.Fatalf("Expected generated shared library output to remain local build output, got: %s", output)
 	}
 }
@@ -1416,8 +1422,11 @@ func TestCCTestRule(t *testing.T) {
 		t.Fatalf("Expected [foo_test.test], got %v", outs)
 	}
 	edge := r.NinjaEdge(m, DefaultRuleRenderContext())
-	if !strings.Contains(edge, "build foo_test.test: cc_link foo_test_foo_test.o") {
-		t.Fatalf("Expected cc_test link edge, got: %s", edge)
+	// objectOutputName uses module name prefix logic:
+	// - If src contains module name prefix, just use src name
+	// - For "foo_test.c" with module "foo_test", returns "foo_test.o"
+	if !strings.Contains(edge, "build foo_test.test: cc_link foo_test.o") {
+		t.Fatalf("Expected cc_test link edge with foo_test.o, got: %s", edge)
 	}
 }
 
