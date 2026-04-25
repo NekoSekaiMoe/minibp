@@ -1,9 +1,30 @@
 // Package parser provides lexical analysis and parsing for Blueprint build definitions.
 // Parser subpackage - Blueprint recursive descent parser.
 //
-// This file contains the Parser struct and its methods for converting tokens
-// into an Abstract Syntax Tree (AST). The parser uses a recursive descent
-// approach, building parse trees top-down by following the grammar rules.
+// This package implements the second stage of the Blueprint build system:
+// it takes a stream of tokens from the lexer and produces an Abstract Syntax Tree (AST).
+// The parser uses a recursive descent approach, building parse trees top-down
+// by following the grammar rules defined for Blueprint source files.
+//
+// The parser handles:
+//   - Module definitions: cc_binary { ... }, cc_library { ... }, etc.
+//   - Variable assignments: my_var = "value", my_list += ["item"]
+//   - Expressions: strings, integers, booleans, lists, maps
+//   - select() conditional expressions for architecture-specific values
+//   - Property overrides: arch: {...}, host: {...}, target: {...}, multilib: {...}
+//
+// Grammar overview:
+//   File        -> Definition*
+//   Definition  -> Module | Assignment
+//   Module      -> IDENT LBRACE PropertyList RBRACE
+//   Assignment  -> IDENT (ASSIGN | PLUSEQ) Expression
+//   Expression  -> Primary (PLUS Primary)*
+//   Primary     -> STRING | INT | BOOL | LIST | MAP | IDENT | select()
+//
+// Error handling:
+//   Parse errors are collected and aggregated rather than failing immediately.
+//   This allows users to fix multiple issues in a single pass.
+//   The parser uses error recovery to skip to the next definition after an error.
 package parser
 
 import (
@@ -16,13 +37,27 @@ import (
 // Parser parses Blueprint files.
 // It uses a recursive descent parsing approach, consuming tokens from the lexer
 // and building an AST (Abstract Syntax Tree) representation of the Blueprint code.
-// The parser handles modules, assignments, expressions, and special constructs
-// like select() statements for conditional values.
 //
-// The parser maintains lookahead tokens to enable grammar decisions without
-// consuming tokens prematurely. It also provides error recovery by skipping
-// to the next definition when a parse error occurs, allowing multiple
-// errors to be reported in a single pass.
+// The parser handles:
+//   - Modules: type { property_list }
+//   - Assignments: name = value or name += value
+//   - Expressions: literals, variables, operators, select()
+//   - Property overrides: arch:, host:, target:, multilib:, override:
+//
+// The parser maintains lookahead tokens (curToken and peekToken) to enable
+// grammar decisions that require looking ahead more than one token.
+// It also provides error recovery by skipping to the next definition when
+// a parse error occurs, allowing multiple errors to be reported in a single pass.
+//
+// Token management:
+//   - curToken: The current token being processed
+//   - peekToken: The next token (lookahead) for grammar look-ahead
+//   - nextToken(): Advances both curToken and peekToken forward
+//
+// Error handling:
+//   - Errors are collected in the errors slice rather than failing immediately
+//   - skipToNextDefinition() provides error recovery
+//   - All errors are returned with source position information
 type Parser struct {
 	lexer     *Lexer  // The lexer used to tokenize the input
 	curToken  Token   // The current token being processed
@@ -31,19 +66,26 @@ type Parser struct {
 	errors    []error // List of parsing errors encountered
 }
 
-// NewParser creates a new parser from an ioReader.
-// It initializes the parser with a new lexer and advances past the first two tokens
-// to set up curToken and peekToken for the parsing process.
-// The lookahead token is needed because some grammar rules require looking
-// ahead more than one token to decide how to parse.
+// NewParser creates a new Parser from an io.Reader.
+// It initializes the parser with a new lexer for the given input source
+// and advances past the first two tokens to set up curToken and peekToken.
+//
+// This two-token initialization is required because the recursive descent
+// parser often needs to look ahead one token to make grammar decisions.
+// For example, when parsing an identifier, the parser needs to know
+// whether the next token is LBRACE (module) or ASSIGN (assignment).
+//
+// Setup process:
+//   1. Create lexer with the input reader and filename
+//   2. Call nextToken() twice to fill curToken and peekToken
+//   3. Parser is now ready to parse
 //
 // Parameters:
-//   - r: The input reader containing Blueprint source code
-//   - fileName: The name of the file being parsed (used for error messages)
+//   - r: The input io.Reader containing Blueprint source code
+//   - fileName: The name of the file being parsed (for error messages)
 //
 // Returns:
-//
-//	A new Parser instance ready to parse the input
+//   - A new Parser instance ready to parse the input
 func NewParser(r io.Reader, fileName string) *Parser {
 	p := &Parser{
 		lexer:    NewLexer(r, fileName),
@@ -58,28 +100,36 @@ func NewParser(r io.Reader, fileName string) *Parser {
 }
 
 // nextToken advances the parser to the next token in the input stream.
-// It moves the current token (curToken) to become the previous token and promotes
-// the lookahead token (peekToken) to be the current token. Then it fetches
-// a new lookahead token from the lexer.
+// It performs a "shift" operation: curToken becomes the previous token,
+// peekToken becomes the current token, and a new peekToken is fetched
+// from the lexer.
 //
-// This is the primary mechanism for traversing the token stream during
-// recursive descent parsing. Each call consumes one token and makes the next
-// token available for inspection.
+// This is the fundamental token advancement mechanism for the recursive
+// descent parser. Each call to nextToken() consumes one token and makes
+// the next token available for inspection via peekToken.
+//
+// Token flow:
+//   Before: curToken=A, peekToken=B, lexer.position=C
+//   After:  curToken=B, peekToken=C, lexer.position=D
 func (p *Parser) nextToken() {
 	p.curToken = p.peekToken
 	p.peekToken = p.lexer.NextToken()
 }
 
 // expect checks if the current token matches the expected type.
-// If it matches, it consumes the token and advances to the next token.
+// If it matches, it consumes the token (via nextToken()) and returns the matched token.
 // If it doesn't match, it returns an error with the position and expected vs actual token types.
 //
 // This method is used when the grammar requires a specific token type.
-// The error message includes both the expected type and what was actually found,
-// along with the source position for accurate error reporting.
+// For example, after parsing a property name, the parser expects a COLON token.
+//
+// Error message includes:
+//   - Source position of the current token
+//   - Expected token type
+//   - Actual token type found
 //
 // Parameters:
-//   - t: The expected TokenType
+//   - t: The expected TokenType (e.g., LBRACE, ASSIGN, COLON)
 //
 // Returns:
 //   - Token: The matched token if successful
@@ -93,13 +143,14 @@ func (p *Parser) expect(t TokenType) (Token, error) {
 	return Token{}, fmt.Errorf("%s: expected %s, got %s", p.curToken.Pos, t, p.curToken.Type)
 }
 
-// expectPeek checks if the peek token matches the expected type.
+// expectPeek checks if the peek token (lookahead) matches the expected type.
 // Unlike expect(), this checks the lookahead token without consuming it.
+// The token is consumed only if it matches.
+//
 // This is used when we need to look ahead to make a parsing decision,
 // but don't want to commit to consuming the token yet.
-//
-// If the peek token matches, it advances the token stream.
-// If not, the peek token remains available for future inspection.
+// For example, to decide if something is a module vs assignment,
+// we need to look at peekToken without consuming it.
 //
 // Parameters:
 //   - t: The expected TokenType for the peek token
@@ -116,11 +167,19 @@ func (p *Parser) expectPeek(t TokenType) bool {
 
 // Parse parses the entire input and returns a File AST node.
 // It repeatedly parses definitions until the end of file is reached.
-// After parsing all definitions, it also collects any lexer errors
-// to ensure all issues are reported to the caller.
+// After parsing all definitions, it collects any lexer errors to ensure
+// all issues are reported to the caller.
 //
-// The parser continues after parse errors by using error recovery,
-// allowing multiple errors to be detected in a single pass.
+// Parse flow:
+//   1. Create an empty File node with the filename
+//   2. Loop: parseDefinition() until EOF token
+//   3. Collect errors from parser and lexer
+//   4. Return File and errors
+//
+// Error handling:
+//   - Parse errors are collected rather than failing immediately
+//   - Error recovery via skipToNextDefinition() continues after errors
+//   - Lexer errors are included in the final error list
 //
 // Returns:
 //   - *File: The parsed AST representation of the Blueprint file
@@ -152,12 +211,17 @@ func (p *Parser) Parse() (*File, []error) {
 }
 
 // skipToNextDefinition skips tokens until we reach a potential start of a definition.
-// This is used for error recovery - when a parse error occurs, we skip forward to try
-// to continue parsing subsequent definitions rather than stopping entirely.
+// This is used for error recovery - when a parse error occurs, we skip forward
+// to try to continue parsing subsequent definitions rather than stopping entirely.
 //
-// It skips tokens until it finds an IDENT token (which could be a module type or variable name)
-// or reaches EOF. This allows the parser to recover from syntax errors and continue
-// processing the rest of the file.
+// It skips tokens until it finds an IDENT token (which could be a module type
+// or variable name) or reaches EOF. This allows the parser to
+// recover from syntax errors and continue processing the rest of the file.
+//
+// Example error recovery:
+//   my_module { srcs: ["file.c", }
+//            ^ parse error here
+//   another_module { }  <- skipToNextDefinition skips to here
 func (p *Parser) skipToNextDefinition() {
 	for p.curToken.Type != EOF && p.curToken.Type != IDENT {
 		p.nextToken()
@@ -170,8 +234,14 @@ func (p *Parser) skipToNextDefinition() {
 //   - If followed by LBRACE ({), it's a module definition
 //   - If followed by ASSIGN (=) or PLUSEQ (+=), it's an assignment
 //
-// This is the top-level parsing rule that distinguishes between
-// the two main constructs in Blueprint files.
+// Grammar:
+//   Definition -> IDENT (LBRACE Module | (ASSIGN | PLUSEQ) Assignment)
+//
+// Token flow:
+//   1. Verify current token is IDENT
+//   2. Record name and position
+//   3. Advance to next token
+//   4. Check token to decide definition type
 //
 // Returns:
 //   - Definition: A Module or Assignment AST node

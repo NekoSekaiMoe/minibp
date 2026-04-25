@@ -1,10 +1,24 @@
 // Package parser provides lexical analysis and parsing for Blueprint build definitions.
 // AST subpackage - Abstract Syntax Tree node definitions.
 //
-// This file defines all the AST node types used to represent Blueprint
+// This package defines all the AST node types used to represent Blueprint
 // source code after parsing. Each type corresponds to a construct in
-// the Blueprint language, such as modules, assignments, expressions,
-// and control flow constructs like select().
+// the Blueprint language.
+//
+// AST node categories:
+//   - Files: File (root node containing definitions)
+//   - Definitions: Module, Assignment (top-level constructs)
+//   - Expressions: String, Int64, Bool, List, Map, Variable, Operator, Select, Unset
+//   - Supporting: Property, Map (key-value structures)
+//
+// All expression types implement the Expression interface:
+//   - String(): Returns string representation
+//   - Pos(): Returns source position for error reporting
+//
+// Design notes:
+//   - Properties are stored in ordered slices to preserve source order
+//   - Position information is kept for error messages
+//   - Select has dedicated condition and case structures
 package parser
 
 import (
@@ -17,13 +31,18 @@ import (
 // and string representation. This allows the parser and evaluator to handle
 // different expression types uniformly.
 //
-// The Expression interface is implemented by:
-//   - String, Int64, Bool (literals)
-//   - List, Map (composite types)
-//   - Variable (variable reference)
-//   - Operator (binary operation)
-//   - Select (conditional)
-//   - Unset (unset keyword)
+// The Expression interface enables:
+//   - Unified string representation for debugging
+//   - Source position for error reporting
+//   - Generic expression handling in the evaluator
+//
+// Implementers:
+//   - String, Int64, Bool: Literal values
+//   - List, Map: Composite types
+//   - Variable: Variable reference
+//   - Operator: Binary operation
+//   - Select: Conditional expression
+//   - Unset: Unset keyword
 type Expression interface {
 	String() string        // Returns a string representation of the expression
 	Pos() scanner.Position // Returns the source position of this expression

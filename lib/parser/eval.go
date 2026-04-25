@@ -1,11 +1,28 @@
 // Package parser provides lexical analysis and parsing for Blueprint build definitions.
 // Eval subpackage - AST evaluation and expression processing.
 //
-// This file contains the Evaluator which transforms AST nodes into
-// Go values. It handles variable resolution, string interpolation,
+// This package implements the third stage of the Blueprint build system:
+// it takes AST nodes from the parser and evaluates them to produce Go values.
+// The evaluator handles variable resolution, string interpolation,
 // operator evaluation, and select() conditional expressions.
-// The evaluator is the bridge between the parsed AST and the build system's
-// runtime data structures.
+//
+// Supported operations:
+//   - Variable assignment and reference: my_var = "value", ${my_var}
+//   - String interpolation: "src/${arch}/file.c"
+//   - Binary operators: +, -, *
+//   - select() conditions: arch(), os(), host(), target(), variant(), etc.
+//   - String/list concatenation: list + list, string + string
+//   - Map merging: map properties recursively merge
+//
+// Evaluation flow:
+//   1. ProcessAssignments: Evaluate all variable assignments in order
+//   2. Eval: Evaluate any expression AST node to its Go value
+//   3. evalSelect: Handle architecture/platform-specific values
+//
+// Error handling:
+//   - Undefined variables return nil
+//   - select() with no match records error in strict mode
+//   - All errors include source position information
 package parser
 
 import (
@@ -37,19 +54,35 @@ var UnsetSentinel = &struct{ name string }{name: "unset"}
 // used during evaluation of expressions, property values, and select statements.
 //
 // The evaluator supports:
-//   - Variable assignment and resolution
-//   - String interpolation with ${var} syntax
-//   - Binary operators (+, -, *)
-//   - select() conditional expressions
-//   - Configuration-specific variant selection
+//   - Variable assignment: SetVar(name, value) and += concatenation
+//   - String interpolation: ${variable} patterns in strings
+//   - Binary operators: +, -, * for integers; + for strings/lists
+//   - select() conditional: Chooses values based on configuration
+//   - Configuration lookup: arch, os, host, target, variant, etc.
+//
+// Data structures:
+//   - vars: Variable table - name -> value
+//   - config: Configuration - key -> value (set from build system)
+//   - selectErrors: Errors from select() evaluation
+//
+// Evaluation model:
+//   - Variables are processed in source order (dependency order)
+//   - select() supports strict mode (error on no match) and permissive mode
+//   - All expressions are evaluated to Go native types
 type Evaluator struct {
-	vars         map[string]interface{} // Variable table: name -> value
-	config       map[string]string      // Configuration: key (arch, os, target) -> value
-	strictSelect bool                   // If true, select() with no matching case and no default is an error
-	selectErrors []error                // Errors from select() evaluation when strictSelect is true
+	vars         map[string]interface{} // Variable table: name -> value (string, int64, bool, []interface{}, map, etc.)
+	config       map[string]string      // Configuration: key (arch, os, host, target) -> value
+	strictSelect bool                   // If true, unmatched select() produces error; if false, returns nil silently
+	selectErrors []error                // Errors collected from select() evaluation (only in strict mode)
 }
 
 // NewEvaluator creates a new Evaluator with empty variable and config maps.
+//
+// The evaluator starts with no variables defined and an empty
+// configuration. Variables are added via SetVar() or processed
+// from Assignment nodes. Configuration is set via SetConfig()
+// or from command-line flags.
+//
 // Returns:
 //   - A new Evaluator instance ready to evaluate expressions
 func NewEvaluator() *Evaluator {
@@ -61,9 +94,18 @@ func NewEvaluator() *Evaluator {
 }
 
 // SetStrictSelect controls whether select() statements without a matching case and no default
-// should produce an error. When strict is true (the default), unmatched select() expressions
-// will be collected in SelectErrors for later reporting.
-// When strict is false, unmatched select() returns nil silently.
+// should produce an error.
+//
+// When strict is true (the default):
+//   - Unmatched select() expressions are collected in SelectErrors
+//   - The build will fail after all evaluation is complete
+//
+// When strict is false:
+//   - Unmatched select() returns nil silently
+//   - No errors are recorded
+//
+// This is useful for permissive parsing or when default values
+// are expected but not specified.
 //
 // Parameters:
 //   - strict: Whether to enforce strict select() evaluation
@@ -87,12 +129,15 @@ func (e *Evaluator) SelectErrors() []error {
 // in expressions throughout the Blueprint file.
 //
 // Supported value types:
-//   - string: String values
-//   - int64: Integer values
-//   - bool: Boolean values
-//   - []string: List of strings
+//   - string: String values like "hello"
+//   - int64: Integer values like 42
+//   - bool: Boolean values like true
+//   - []string: List of strings like ["a", "b"]
 //   - []interface{}: Generic list
 //   - map[string]interface{}: Map/dictionary
+//
+// Variables are looked up during expression evaluation.
+// The variable table is populated by ProcessAssignments().
 //
 // Parameters:
 //   - name: The variable name

@@ -1,5 +1,29 @@
 // Package errors provides enhanced error handling for minibp with categorized errors,
 // helpful suggestions, and context information.
+//
+// This package defines the BuildError type which is the primary error type used throughout
+// minibp. It provides rich error information including:
+//   - Error categorization (SyntaxError, DependencyError, etc.)
+//   - Severity levels (Error, Warning, Info)
+//   - Source location (file, line, column)
+//   - Code snippets
+//   - Actionable suggestions for fixing
+//   - Wrapped underlying causes
+//
+// Error categories allow callers to programmatically classify errors and provide specific
+// handling. For example, circular dependency errors might allow the build to
+// continue with warnings, while syntax errors would fail immediately.
+//
+// The package also provides convenience constructors for common error types:
+//   - errors.Syntax() for parsing errors
+//   - errors.Dependency() for dependency resolution failures
+//   - errors.Circular() for circular dependency detection
+//   - errors.NotFound() for missing files
+//   - errors.Duplicate() for duplicate definitions
+//   - errors.Missing() for required properties
+//   - errors.Invalid() for invalid property values
+//   - errors.Config() for configuration errors
+//   - errors.Type() for type mismatches
 package errors
 
 import (

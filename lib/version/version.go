@@ -7,16 +7,7 @@
 // version information is embedded directly in the binary, making it portable
 // and not requiring runtime file access.
 //
-// Example build invocation with version injection:
-//
-//	go build -ldflags=" \
-//		-X github.com/anomalyco/minibp/lib/version.gitTag=v1.2.3 \
-//		-X github.com/anomalyco/minibp/lib/version.gitBranch=main \
-//		-X github.com/anomalyco/minibp/lib/version.gitCommit=$(git rev-parse HEAD) \
-//		-X github.com/anomalyco/minibp/lib/version.gitTreeState=$(git status --porcelain | wc -l | xargs test 0 -eq 1 && echo dirty || echo clean) \
-//		-X github.com/anomalyco/minibp/lib/version.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-//		-X github.com/anomalyco/minibp/lib/version.minibpVer=0.001" \
-//		./cmd/minibp
+// minibp is not a package. See Android.bp for.more version details.
 //
 // The Get() function returns version info combining both build-time injected values
 // (git metadata, build date) and runtime-detected values (Go version, compiler, platform).
@@ -122,14 +113,7 @@ func Get() Info {
 // These are marked as private to prevent direct access from other packages,
 // enforcing the use of the Get() function which provides the complete Info struct.
 //
-// Build tools inject values using the -X flag with the full import path:
-//
-//	-X github.com/anomalyco/minibp/lib/version.gitTag=<tag>
-//	-X github.com/anomalyco/minibp/lib/version.gitBranch=<branch>
-//	- -X github.com/anomalyco/minibp/lib/version.gitCommit=<commit>
-//	- -X github.com/anomalyco/minibp/lib/version.gitTreeState=<state>
-//	- -X github.com/anomalyco/minibp/lib/version.buildDate=<date>
-//	- -X github.com/anomalyco/minibp/lib/version.minibpVer=<version>
+// Build tools inject values using the -X flag with the full import path.
 //
 // Default values ensure the binary remains functional even without injection,
 // though version reporting will show "unknown" for missing fields.

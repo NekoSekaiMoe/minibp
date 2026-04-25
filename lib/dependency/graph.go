@@ -1,6 +1,33 @@
 // Package dependency provides advanced dependency management features including
 // transitive dependency resolution, conflict detection, and dependency graph
 // visualization.
+//
+// This package implements a complete dependency management system for the build system,
+// supporting:
+//
+// Transitive Dependency Resolution:
+//   - calculateTransitiveDeps() computes all dependencies (direct and indirect) for each module
+//   - Uses DFS with visited tracking to handle cycles
+//   - Deduplicates dependencies by name
+//
+// Version Conflict Detection:
+//   - detectConflicts() identifies when different parts of the dependency tree
+//     require different versions of the same dependency
+//   - Provides detailed conflict information including the modules requiring each version
+//
+// Topological Ordering:
+//   - topologicalSort() uses Kahn's algorithm to compute valid build order
+//   - Ensures dependencies are built before modules that depend on them
+//   - Detects circular dependencies
+//
+// Visualization:
+//   - Visualize() generates human-readable text representation
+//   - Useful for debugging and logging build issues
+//
+// The graph maintains two edge representations:
+//   - edges: forward mapping (module -> its dependencies)
+//   - reverseEdges: reverse mapping (dependency -> modules that depend on it)
+// This bidirectional structure enables efficient queries in both directions.
 package dependency
 
 import (

@@ -21,6 +21,9 @@
 //   - : must be escaped as $:
 //   - # must be escaped as $#
 //   - space must be escaped as $ (in paths)
+//
+// The Writer type provides methods for writing all Ninja syntax elements.
+// All output is written directly to the underlying writer without buffering.
 package ninja
 
 import (
@@ -35,6 +38,18 @@ import (
 //
 // The Writer is not safe for concurrent use from multiple goroutines.
 // Create separate Writer instances for each output file or use proper synchronization.
+//
+// The Writer provides methods for each Ninja syntax element:
+//   - Rule(): Define command templates
+//   - Build(): Create build edges
+//   - BuildWithVars(): Create build edges with edge-local variables
+//   - Variable(): Define variables
+//   - Comment(): Add comments
+//   - Desc(): Add build descriptions for ninja -v output
+//   - Subninja(): Include sub-build files
+//   - Include(): Include shared rules
+//   - Phony(): Create phony targets
+//   - Default(): Set default build targets
 type Writer struct {
 	w io.Writer
 }

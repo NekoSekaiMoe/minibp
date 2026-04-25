@@ -13,6 +13,9 @@
 //   - ModuleReference: Parses ":module" and ":module{.tag}" references
 //   - Visibility: Validates visibility rules like "//visibility:public"
 //
+// The BuildRule interface is implemented by all module types (cc_library, go_binary, etc.)
+// and provides the bridge between the Blueprint AST and the generated Ninja build file.
+//
 // Visibility rules supported:
 //   - //visibility:public: Visible to all modules
 //   - //visibility:private: Visible only within the same package

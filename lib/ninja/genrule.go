@@ -21,6 +21,13 @@
 //   - Otherwise, generate default output as {name}.out
 //   - tool_files and deps are order-only dependencies (|)
 //   - data files are regular dependencies
+//
+// genrule implements the BuildRule interface:
+//   - Name() string: Returns "genrule"
+//   - NinjaRule(ctx) string: Returns ninja rule definition
+//   - Outputs(m, ctx) []string: Returns output file paths
+//   - NinjaEdge(m, ctx) string: Returns ninja build edges
+//   - Desc(m, src) string: Returns a short description
 package ninja
 
 import (

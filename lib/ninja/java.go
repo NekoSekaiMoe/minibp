@@ -20,6 +20,13 @@
 //   - Stamp files: Intermediate .stamp files track successful javac compilation
 //   - Host variants: Use "-host" suffix to distinguish from device variants
 //   - Executable JARs: Use "jar cfe" to embed main class in manifest
+//
+// Each Java module type implements the BuildRule interface:
+//   - Name() string: Returns the module type name
+//   - NinjaRule(ctx) string: Returns ninja rule definitions
+//   - Outputs(m, ctx) []string: Returns output file paths
+//   - NinjaEdge(m, ctx) string: Returns ninja build edges
+//   - Desc(m, src) string: Returns a short description
 package ninja
 
 import (
@@ -37,6 +44,13 @@ import (
 //
 // This rule produces standard Java library JARs (e.g., name.jar) used as dependencies
 // by other Java modules or binaries.
+//
+// Implements the BuildRule interface:
+//   - Name() string: Returns "java_library"
+//   - NinjaRule(ctx) string: Returns ninja compilation and packaging rules
+//   - Outputs(m, ctx) []string: Returns the .jar output path
+//   - NinjaEdge(m, ctx) string: Returns ninja build edges
+//   - Desc(m, src) string: Returns a short description
 type javaLibrary struct{}
 
 func (r *javaLibrary) Name() string { return "java_library" }
@@ -45,6 +59,12 @@ func (r *javaLibrary) Name() string { return "java_library" }
 // Creates two rules:
 //   - javac_lib: Compiles Java sources to .class files in outdir
 //   - jar_create: Packages .class files from outdir into a .jar archive
+//
+// Parameters:
+//   - ctx: Rule render context (not used, but required by interface)
+//
+// Returns:
+//   - Ninja rule definitions as formatted string
 func (r *javaLibrary) NinjaRule(ctx RuleRenderContext) string {
 
 	return `rule javac_lib

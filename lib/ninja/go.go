@@ -18,6 +18,13 @@
 //   - Variants: Cross-compilation targets specified via target { goos, goarch }
 //   - Suffix format: "_{goos}_{goarch}" for variant-specific outputs
 //   - Dependency linking: .a files linked via implicit dependencies
+//
+// Each Go module type implements the BuildRule interface:
+//   - Name() string: Returns the module type name
+//   - NinjaRule(ctx) string: Returns ninja rule definitions
+//   - Outputs(m, ctx) []string: Returns output file paths
+//   - NinjaEdge(m, ctx) string: Returns ninja build edges
+//   - Desc(m, src) string: Returns a short description
 package ninja
 
 import (
@@ -55,14 +62,17 @@ func (r *goLibrary) NinjaRule(ctx RuleRenderContext) string {
 // Outputs returns the output paths for Go libraries.
 // Returns nil if the module has no name (invalid module).
 // Output format: {name}{suffix}.a
-// Suffix is determined by goVariantSuffix based on context's GOOS/GOARCH.
+// Suffix is "_goos_goarch" when cross-compiling, empty otherwise.
 func (r *goLibrary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
 		return nil
 	}
-	suffix := goVariantSuffix(m, ctx)
-	return []string{fmt.Sprintf("%s%s.a", name, suffix)}
+	goos, goarch, isCrossCompile := goosAndArch(ctx)
+	if !isCrossCompile {
+		return []string{fmt.Sprintf("%s.a", name)}
+	}
+	return []string{fmt.Sprintf("%s_%s_%s.a", name, goos, goarch)}
 }
 
 // NinjaEdge generates ninja build edges for Go library compilation.
@@ -87,12 +97,7 @@ func (r *goLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	variants := getGoTargetVariants(m)
 	if len(variants) == 0 {
-		goos := ctx.GOOS
-		goarch := ctx.GOARCH
-		if goarch == "" {
-			goarch = runtime.GOARCH
-		}
-		isCrossCompile := goos != "" && goos != runtime.GOOS
+		goos, goarch, isCrossCompile := goosAndArch(ctx)
 		if !isCrossCompile {
 			goos = ""
 			goarch = ""
@@ -136,20 +141,7 @@ func (r *goLibrary) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext,
 	goflags := getGoflags(m)
 	ldflags := getLdflags(m)
 
-	suffix := ""
-	envVar := ""
-	if goos != "" || goarch != "" {
-		parts := []string{}
-		if goos != "" {
-			parts = append(parts, "GOOS="+goos)
-		}
-		if goarch != "" {
-			parts = append(parts, "GOARCH="+goarch)
-		}
-		envVar = strings.Join(parts, " ")
-		suffix = "_" + goos + "_" + goarch
-	}
-
+	envVar, suffix, _, _ := goVariantEnvVars(goos, goarch)
 	out := fmt.Sprintf("%s%s.a", name, suffix)
 
 	var cmd string
@@ -205,8 +197,11 @@ func (r *goBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	if name == "" {
 		return nil
 	}
-	suffix := goVariantSuffix(m, ctx)
-	return []string{name + suffix}
+	goos, goarch, isCrossCompile := goosAndArch(ctx)
+	if !isCrossCompile {
+		return []string{name}
+	}
+	return []string{fmt.Sprintf("%s_%s_%s", name, goos, goarch)}
 }
 
 // NinjaEdge generates ninja build edges for Go binary compilation.
@@ -231,13 +226,7 @@ func (r *goBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	variants := getGoTargetVariants(m)
 	if len(variants) == 0 {
-		goos := ctx.GOOS
-		goarch := ctx.GOARCH
-		isCrossCompile := goos != "" && goos != runtime.GOOS
-		// Cross-compile when GOARCH is different from runtime
-		if !isCrossCompile && goarch != "" && goarch != runtime.GOARCH {
-			isCrossCompile = true
-		}
+		goos, goarch, isCrossCompile := goosAndArch(ctx)
 		if !isCrossCompile {
 			goos = ""
 			goarch = ""
@@ -282,37 +271,13 @@ func (r *goBinary) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext, 
 	goflags := getGoflags(m)
 	ldflags := getLdflags(m)
 
-	suffix := ""
-	envVar := ""
-	if goos != "" || goarch != "" {
-		parts := []string{}
-		if goos != "" {
-			parts = append(parts, "GOOS="+goos)
-		}
-		if goarch != "" {
-			parts = append(parts, "GOARCH="+goarch)
-		}
-		envVar = strings.Join(parts, " ")
-		if goos == "" {
-			goos = runtime.GOOS
-		}
-		if goarch == "" {
-			goarch = runtime.GOARCH
-		}
-		suffix = "_" + goos + "_" + goarch
-	}
-
+	envVar, suffix, _, _ := goVariantEnvVars(goos, goarch)
 	out := name + suffix
 
-	// Convert dependency module references to archive file names with suffix.
-	depSuffix := ""
-	if goos != "" || goarch != "" {
-		depSuffix = "_" + goos + "_" + goarch
-	}
 	var libFiles []string
 	for _, dep := range deps {
 		depName := strings.TrimPrefix(dep, ":")
-		libFiles = append(libFiles, depName+depSuffix+".a")
+		libFiles = append(libFiles, depName+suffix+".a")
 	}
 
 	srcStr := strings.Join(srcs, " ")
@@ -377,8 +342,11 @@ func (r *goTest) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	if name == "" {
 		return nil
 	}
-	suffix := goVariantSuffix(m, ctx)
-	return []string{fmt.Sprintf("%s%s.test", name, suffix)}
+	goos, goarch, isCrossCompile := goosAndArch(ctx)
+	if !isCrossCompile {
+		return []string{fmt.Sprintf("%s.test", name)}
+	}
+	return []string{fmt.Sprintf("%s_%s_%s.test", name, goos, goarch)}
 }
 
 // NinjaEdge generates ninja build edges for Go test compilation.
@@ -400,12 +368,7 @@ func (r *goTest) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	variants := getGoTargetVariants(m)
 	if len(variants) == 0 {
-		goos := ctx.GOOS
-		goarch := ctx.GOARCH
-		if goarch == "" {
-			goarch = runtime.GOARCH
-		}
-		isCrossCompile := goos != "" && goos != runtime.GOOS
+		goos, goarch, isCrossCompile := goosAndArch(ctx)
 		if !isCrossCompile {
 			goos = ""
 			goarch = ""
@@ -448,23 +411,9 @@ func (r *goTest) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext, go
 	srcs := getSrcs(m)
 	goflags := getGoflags(m)
 	ldflags := getLdflags(m)
-	// Derive package path from source file directory.
 	pkgPath := "./" + filepath.Dir(srcs[0])
 
-	suffix := ""
-	envVar := ""
-	if goos != "" || goarch != "" {
-		parts := []string{}
-		if goos != "" {
-			parts = append(parts, "GOOS="+goos)
-		}
-		if goarch != "" {
-			parts = append(parts, "GOARCH="+goarch)
-		}
-		envVar = strings.Join(parts, " ")
-		suffix = "_" + goos + "_" + goarch
-	}
-
+	envVar, suffix, _, _ := goVariantEnvVars(goos, goarch)
 	out := fmt.Sprintf("%s%s.test", name, suffix)
 
 	var cmd string
@@ -487,24 +436,53 @@ func (r *goTest) Desc(m *parser.Module, srcFile string) string {
 	return "go test"
 }
 
-// goVariantSuffix returns the output suffix for a Go target variant.
-// Returns empty string if either GOOS or GOARCH is not set.
-// Returns "_{GOOS}_{GOARCH}" if both are set.
+// goosAndArch returns the effective GOOS and GOARCH from context.
+// It also returns whether this is a cross-compilation scenario.
+// If goos/goarch are different from runtime, they're considered cross-compilation.
 //
-// This suffix is used to differentiate outputs when cross-compiling for multiple targets.
-// Example: "linux_amd64", "darwin_arm64", "windows_386"
-func goVariantSuffix(m *parser.Module, ctx RuleRenderContext) string {
-	goos := ctx.GOOS
-	goarch := ctx.GOARCH
-	isCrossCompile := (goarch != "" && goarch != runtime.GOARCH) || (goos != "" && goos != runtime.GOOS)
-	if !isCrossCompile {
-		return ""
-	}
+// The returned (goos, goarch) values are normalized:
+//   - Empty goarch defaults to runtime.GOARCH
+//   - Empty goos defaults to runtime.GOOS
+//
+// The isCrossCompile return value indicates whether the target differs
+// from the host platform (for output suffix generation).
+func goosAndArch(ctx RuleRenderContext) (goos, goarch string, isCrossCompile bool) {
+	goos = ctx.GOOS
+	goarch = ctx.GOARCH
 	if goarch == "" {
 		goarch = runtime.GOARCH
 	}
 	if goos == "" {
 		goos = runtime.GOOS
 	}
-	return "_" + goos + "_" + goarch
+	isCrossCompile = goarch != runtime.GOARCH || goos != runtime.GOOS
+	return
+}
+
+// goVariantEnvVars builds the environment variable string and suffix for Go targets.
+// It accepts goos/goarch (which may be empty strings) and returns:
+//   - envVar: The GOOS/GOARCH environment variable string (e.g., "GOOS=linux GOARCH=amd64")
+//   - suffix: The output suffix (e.g., "_linux_amd64", or "" if no cross-compilation)
+//   - normGoos, normGoarch: goos/goarch with defaults filled in
+func goVariantEnvVars(goos, goarch string) (envVar string, suffix string, normGoos, normGoarch string) {
+	normGoos = goos
+	normGoarch = goarch
+	if normGoarch == "" {
+		normGoarch = runtime.GOARCH
+	}
+	if normGoos == "" {
+		normGoos = runtime.GOOS
+	}
+	if goos != "" || goarch != "" {
+		parts := []string{}
+		if goos != "" {
+			parts = append(parts, "GOOS="+goos)
+		}
+		if goarch != "" {
+			parts = append(parts, "GOARCH="+goarch)
+		}
+		envVar = strings.Join(parts, " ")
+		suffix = "_" + normGoos + "_" + normGoarch
+	}
+	return
 }

@@ -1,8 +1,26 @@
 // Package parser provides lexical analysis and parsing for Blueprint build definitions.
-// It implements a recursive-descent parser that transforms Blueprint source files
-// into an Abstract Syntax Tree (AST) for further processing by the build system.
-// The parser handles modules, assignments, expressions, and conditional constructs
-// like select() statements for architecture-specific values.
+// Lexer subpackage - Tokenization of Blueprint source files.
+//
+// This package implements the first stage of the Blueprint build system:
+// it reads raw source text and produces a stream of tokens.
+// The lexer wraps Go's text/scanner package to provide Blueprint-specific tokenization.
+//
+// Token types:
+//   - Special tokens: EOF (end of file), ILLEGAL (invalid character)
+//   - Literals: IDENT (identifiers), STRING (string literals), INT (integers), BOOL (true/false)
+//   - Symbols: LPAREN, RPAREN, LBRACE, RBRACE, LBRACKET, RBRACKET
+//   - Operators: COLON, COMMA, PLUS, ASSIGN, PLUSEQ, UNSET, AT
+//
+// String support:
+//   - Double-quoted strings: "hello world"
+//   - Single-quoted strings: 'hello world'
+//   - Raw strings: `hello world`
+//   - Escape sequences: \n, \t, \\, \", etc.
+//
+// Error handling:
+//   - Lexer errors are collected and returned separately
+//   - Invalid characters are reported but scanning continues
+//   - Position information is included for all errors
 package parser
 
 import (
@@ -14,39 +32,57 @@ import (
 
 // TokenType represents the type of a lexical token.
 // Each token type corresponds to a specific kind of syntax element in Blueprint.
+//
+// Token categories:
+//   - Special: EOF (end of file), ILLEGAL (unrecognized character)
+//   - Literals: IDENT (variable/module names), STRING (quoted text), INT (numbers), BOOL (true/false)
+//   - Grouping: LPAREN/RPAREN (function calls, grouping), LBRACE/RBRACE (modules, maps),
+//             LBRACKET/RBRACKET (lists)
+//   - Operators: COLON (property separator), COMMA (separator), PLUS (concatenation),
+//             ASSIGN simple assignment (=), PLUSEQ (+=), UNSET (unset keyword), AT (@ binding)
 type TokenType int
 
 const (
-	// Special tokens
-	EOF     TokenType = iota // End of file
-	ILLEGAL                  // Unknown/invalid token
+	// Special tokens (internal markers)
+	EOF     TokenType = iota // End of file marker - returned when no more input
+	ILLEGAL                  // Unknown/invalid character - recorded as error but scanning continues
 
-	// Literals - values that appear in the source code
-	IDENT  // Identifiers: variable names, module types, property names
-	STRING // String literals: "hello", `raw string`
-	INT    // Integer literals: 42, 100
+	// Literals - values that appear directly in source code
+	IDENT  // Identifiers: variable names (my_var), module types (cc_binary), property names (srcs)
+	STRING // String literals: "hello", 'hello', `raw string`
+	INT    // Integer literals: 42, 100, -10
 	BOOL   // Boolean literals: true, false
 
-	// Symbols - punctuation and operators
-	LPAREN   // (  Left parenthesis
+	// Grouping symbols - structure markers
+	LPAREN   // (  Left parenthesis - for function calls and grouping
 	RPAREN   // )  Right parenthesis
-	LBRACE   // {  Left brace
+	LBRACE   // {  Left brace - for module blocks and maps
 	RBRACE   // }  Right brace
-	LBRACKET // [  Left bracket
+	LBRACKET // [  Left bracket - for lists
 	RBRACKET // ]  Right bracket
-	COLON    // :  Colon (property separator)
-	COMMA    // ,  Comma (list/property separator)
-	PLUS     // + Plus (concatenation operator)
-	ASSIGN   // = Equals (assignment operator)
-	PLUSEQ   // += Plus-equals (concatenation assignment)
-	UNSET    // unset keyword
-	AT       // @ At sign (for any @ var binding in select)
+
+	// Operators and separators
+	COLON    // :  Colon - property separator in maps
+	COMMA    // ,  Comma - list/element separator
+	PLUS     // +  Plus - concatenation operator
+	ASSIGN   // =  Equals - simple assignment operator
+	PLUSEQ   // += Plus-equals - concatenation assignment operator
+	UNSET    // unset keyword - for removing property values in select
+	AT       // @  At sign - for any @ var binding in select patterns
 )
 
 // Token represents a lexical token with its type, literal value, and source position.
 // This is the fundamental unit of output from the lexer.
-// The Position field is used for error reporting to pinpoint exactly where
-// in the source file a particular token was found.
+//
+// Token structure:
+//   - Type: The token type (TokenType enum)
+//   - Literal: The actual text from the source (for identifiers, strings, numbers, symbols)
+//   - Pos: Source position (filename, line, column) for error reporting
+//
+// Example tokens:
+//   - Token{Type: IDENT, Literal: "cc_binary", Pos: file.bp:1:1}
+//   - Token{Type: STRING, Literal: "\"hello\"", Pos: file.bp:2:5}
+//   - Token{Type: ASSIGN, Literal: "=", Pos: file.bp:3:10}
 type Token struct {
 	Type    TokenType        // The type of this token
 	Literal string           // The actual text of the token (for identifiers, strings, etc.)
@@ -54,13 +90,29 @@ type Token struct {
 }
 
 // Lexer wraps text/scanner to provide Blueprint-specific tokenization.
-// It converts raw source text into a stream of tokens that the parser can consume.
-// The lexer handles Go-compatible string literals (both quoted and raw),
-// integer literals, identifiers, and various punctuation symbols.
+// It converts raw source text into a stream of Token values that the parser can consume.
+//
+// The lexer handles:
+//   - Go-compatible string literals (double-quoted, single-quoted, raw)
+//   - Integer literals (decimal integers)
+//   - Identifiers (variable names, module types, property names)
+//   - Keywords (true, false, unset)
+//   - Symbols (parentheses, braces, brackets)
+//   - Operators (=, +=, :, ,, +)
+//   - Comments (skipped entirely)
+//
+// Token production:
+//   - NextToken() returns the next token in the input stream
+//   - Tokenization is incremental - tokens are produced on demand
+//   - The scanner scans ahead to find token boundaries
+//
+// Error handling:
+//   - Invalid characters are recorded in the errors slice
+//   - Scanning continues after errors for incremental reporting
 type Lexer struct {
-	scanner scanner.Scanner // The underlying Go scanner
-	ch      rune            // Current character being processed
-	errors  []error         // List of lexer errors encountered
+	scanner scanner.Scanner // The underlying Go scanner - provides character scanning
+	ch      rune            // Current character being processed (cached for peeking)
+	errors  []error         // List of lexer errors encountered during scanning
 }
 
 // NewLexer creates a new lexer from an ioReader.

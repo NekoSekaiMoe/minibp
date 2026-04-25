@@ -19,6 +19,13 @@
 //   - Graph interface for dependency ordering
 //   - map[string]BuildRule for module type implementations
 //   - map[string]*parser.Module for all module definitions
+//
+// This file contains the core Generator implementation, helper types,
+// and utility functions for ninja generation. Key types include:
+//   - Generator: Main struct that orchestrates ninja file generation
+//   - Graph: Interface providing dependency ordering via TopoSort
+//   - BuildRule: Interface implemented by each module type (cc, go, java, etc.)
+//   - Toolchain: Struct holding compiler paths and flags
 package ninja
 
 import (
@@ -64,6 +71,13 @@ type Generator struct {
 
 // Toolchain holds compiler/tool configuration for cross-compilation.
 // It encapsulates all tool paths and flags needed to build for a specific target.
+// The Toolchain struct provides a centralized way to configure:
+//   - C and C++ compilers (CC, CXX)
+//   - Static library archiver (AR)
+//   - Compiler and linker flags (CFlags, LdFlags)
+//   - Sysroot for cross-compilation
+//   - Compiler cache (ccache) for incremental build acceleration
+//   - LTO mode for Link Time Optimization
 type Toolchain struct {
 	CC      string   // C compiler command (e.g., gcc, clang)
 	CXX     string   // C++ compiler command (e.g., g++, clang++)
@@ -86,6 +100,9 @@ type Toolchain struct {
 //
 // Returns:
 //   - Generator with default settings (sourceDir=".", outputDir=".")
+//
+// The generator is configured with default directories and must have SetSourceDir
+// and SetOutputDir called before generating if non-default paths are needed.
 func NewGenerator(g Graph, rules map[string]BuildRule, modules map[string]*parser.Module) *Generator {
 	return &Generator{
 		graph:     g,
@@ -172,6 +189,11 @@ func (g *Generator) SetMultilib(archs []string) {
 	g.multilib = archs
 }
 
+// SetTargetOS sets the target operating system for cross-compilation.
+// This is used for Go modules to set GOOS environment variable.
+//
+// Parameters:
+//   - os: Target operating system (e.g., "linux", "darwin", "windows")
 func (g *Generator) SetTargetOS(os string) {
 	g.targetOS = os
 }
@@ -745,6 +767,21 @@ func (g *Generator) ruleRenderContext() RuleRenderContext {
 	return g.ruleRenderContextForArch(g.arch)
 }
 
+// ruleRenderContextForArch returns the rule render context for a specific target architecture.
+// This helper method configures the context with architecture-specific flags and toolchain settings.
+// It is called when generating rules for each architecture in multilib mode.
+//
+// Parameters:
+//   - arch: Target architecture name (e.g., "arm", "arm64", "x86", "x86_64")
+//
+// Returns:
+//   - RuleRenderContext configured for the specified architecture
+//
+// The context includes:
+//   - Compiler (CC, CXX, AR) with architecture-specific flags
+//   - LTO flags if enabled
+//   - Sysroot if configured
+//   - GOOS/GOARCH for Go cross-compilation
 func (g *Generator) ruleRenderContextForArch(arch string) RuleRenderContext {
 	tc := g.toolchain
 	if tc.CC == "" {
@@ -1044,12 +1081,20 @@ func (g *Generator) addIncludesToEdge(edge string, includes []string) string {
 // javaDepOutputs finds .jar output files from a module's java dependencies.
 // These are used to construct the classpath for compilation.
 //
+// When a Java module depends on other Java libraries, this function collects
+// the .jar outputs from those dependencies to build the classpath.
+//
 // Parameters:
 //   - moduleName: Name of the module to find dependencies for
 //   - ctx: Rule render context
 //
 // Returns:
 //   - List of .jar file paths from dependencies
+//
+// Edge cases:
+//   - Module doesn't exist: returns nil
+//   - Dependencies don't produce .jar: not included in output
+//   - Duplicate outputs: deduplicated via seen map
 func (g *Generator) javaDepOutputs(moduleName string, ctx RuleRenderContext) []string {
 	m, ok := g.modules[moduleName]
 	if !ok || m == nil {
@@ -1143,12 +1188,21 @@ func (g *Generator) addJavaDepsToEdge(m *parser.Module, edge string) string {
 // moduleDataOutputs resolves data file references from a module's data property.
 // It handles both module references (":name") and plain file paths.
 //
+// Data files are files needed at runtime (e.g., assets, resources) that are
+// bundled with the built artifact. This function resolves module references
+// to their actual output paths.
+//
 // Parameters:
 //   - m: Module to get data outputs from
 //   - ctx: Rule render context
 //
 // Returns:
 //   - List of resolved file paths
+//
+// Edge cases:
+//   - Module reference (":name"): Resolved to module outputs
+//   - Plain file path: Used as-is
+//   - Duplicate outputs: deduplicated via seen map
 func (g *Generator) moduleDataOutputs(m *parser.Module, ctx RuleRenderContext) []string {
 	data := getData(m)
 	if len(data) == 0 {
@@ -1223,6 +1277,8 @@ func (g *Generator) addDataDepsToEdge(m *parser.Module, edge string, ctx RuleRen
 }
 
 func getDistSpecs(m *parser.Module) []*parser.Map {
+	// Collect dist specifications from the module's "dist" property and "dists" list property.
+	// The "dist" property is a single map, while "dists" can contain multiple maps.
 	var specs []*parser.Map
 	if dist := GetMapProp(m, "dist"); dist != nil {
 		specs = append(specs, dist)
@@ -1230,6 +1286,7 @@ func getDistSpecs(m *parser.Module) []*parser.Map {
 	if m.Map == nil {
 		return specs
 	}
+	// Iterate through module properties to find "dists" list
 	for _, prop := range m.Map.Properties {
 		if prop.Name != "dists" {
 			continue
@@ -1247,6 +1304,15 @@ func getDistSpecs(m *parser.Module) []*parser.Map {
 	return specs
 }
 
+// distSpecString extracts a string value from a dist specification map.
+// Dist specifications define how files are distributed to installation directories.
+//
+// Parameters:
+//   - spec: The dist specification map
+//   - key: The key to extract (e.g., "dir", "dest", "suffix")
+//
+// Returns:
+//   - The string value, or empty string if not found
 func distSpecString(spec *parser.Map, key string) string {
 	if spec == nil {
 		return ""
@@ -1261,6 +1327,22 @@ func distSpecString(spec *parser.Map, key string) string {
 	return ""
 }
 
+// distEdgesForModule generates ninja build edges for dist specifications.
+// Dist specifications define files that should be copied to distribution directories.
+// This is used for installing files to system directories (/etc, /usr/share, etc.).
+//
+// Parameters:
+//   - m: Module to generate dist edges for
+//   - ctx: Rule render context
+//
+// Returns:
+//   - Ninja build edges for distribution files
+//
+// The dist edges copy built artifacts to distribution directories:
+//   - Base directory is "dist"
+//   - "dir" property appends to the base path
+//   - "dest" property renames the first output
+//   - "suffix" property changes the output extension
 func (g *Generator) distEdgesForModule(m *parser.Module, ctx RuleRenderContext) string {
 	specs := getDistSpecs(m)
 	if len(specs) == 0 {
@@ -1301,6 +1383,19 @@ func (g *Generator) distEdgesForModule(m *parser.Module, ctx RuleRenderContext) 
 }
 
 // adjustPaths updates paths in ninja edge to be relative to output directory
+// shouldPrefixInputPath determines if an input path should have the path prefix prepended.
+// Input paths are prefixed when they:
+//   - Don't start with $ (ninja variable)
+//   - Don't already have the path prefix
+//   - Don't start with / (absolute path)
+//   - Don't start with .. (parent directory)
+//   - Don't end with .o, .jar, or .stamp (generated files)
+//
+// Parameters:
+//   - path: File path to check
+//
+// Returns:
+//   - true if the path should be prefixed
 func (g *Generator) shouldPrefixInputPath(path string) bool {
 	return !strings.HasPrefix(path, "$") &&
 		!strings.HasPrefix(path, g.pathPrefix) &&
@@ -1311,6 +1406,19 @@ func (g *Generator) shouldPrefixInputPath(path string) bool {
 		!strings.HasSuffix(path, ".stamp")
 }
 
+// shouldPrefixOutputPath determines if an output path should have the path prefix prepended.
+// Output paths are prefixed when they:
+//   - Are not empty
+//   - Don't already have the path prefix
+//   - Don't start with / (absolute path)
+//   - Don't start with .. (parent directory)
+//   - Contain a / (are in a subdirectory)
+//
+// Parameters:
+//   - path: File path to check
+//
+// Returns:
+//   - true if the path should be prefixed
 func (g *Generator) shouldPrefixOutputPath(path string) bool {
 	return path != "" &&
 		!strings.HasPrefix(path, g.pathPrefix) &&
@@ -1319,6 +1427,15 @@ func (g *Generator) shouldPrefixOutputPath(path string) bool {
 		strings.Contains(path, "/")
 }
 
+// adjustBuildPath adjusts a single build path (input or output) by prepending the path prefix.
+// The path prefix is used when the build directory differs from the source directory.
+//
+// Parameters:
+//   - path: The path to adjust
+//   - isOutput: true for output paths, false for input paths
+//
+// Returns:
+//   - Adjusted and escaped path
 func (g *Generator) adjustBuildPath(path string, isOutput bool) string {
 	rawPath := ninjaUnescape(path)
 	if isOutput {
@@ -1331,6 +1448,15 @@ func (g *Generator) adjustBuildPath(path string, isOutput bool) string {
 	return ninjaEscapePath(rawPath)
 }
 
+// adjustPaths updates all paths in a ninja edge to be relative to output directory.
+// If a path prefix is configured, all input and output paths are adjusted.
+// This handles cases where the build directory differs from the source directory.
+//
+// Parameters:
+//   - edge: Ninja edge definition string
+//
+// Returns:
+//   - Edge with adjusted paths
 func (g *Generator) adjustPaths(edge string) string {
 	if g.pathPrefix == "" {
 		return escapeBuildLines(edge)
@@ -1379,6 +1505,15 @@ func (g *Generator) adjustPaths(edge string) string {
 	return strings.Join(adjustedLines, "\n")
 }
 
+// escapeBuildLines escapes paths in ninja build lines for proper output.
+// This is used when no path prefix is configured but paths still need escaping.
+// It parses each build line, unescapes and re-escapes paths for ninja compatibility.
+//
+// Parameters:
+//   - edge: Ninja edge definition string
+//
+// Returns:
+//   - Edge with properly escaped paths
 func escapeBuildLines(edge string) string {
 	lines := strings.Split(edge, "\n")
 	for i, line := range lines {
@@ -1412,7 +1547,11 @@ func escapeBuildLines(edge string) string {
 	return strings.Join(lines, "\n")
 }
 
-// collectUsedModuleTypes returns a deduplicated list of module types used
+// collectUsedModuleTypes returns a deduplicated list of module types used in the build.
+// This is used to determine which ninja rules need to be generated.
+//
+// Returns:
+//   - Sorted slice of unique module type names
 func (g *Generator) collectUsedModuleTypes() []string {
 	seen := make(map[string]bool)
 	var result []string
@@ -1435,6 +1574,11 @@ func (g *Generator) collectUsedModuleTypes() []string {
 	return result
 }
 
+// hasDistTargets returns true if any module has dist specifications.
+// This is used to determine if prebuilt_etc rule needs to be generated.
+//
+// Returns:
+//   - true if any module has dist or dists properties
 func (g *Generator) hasDistTargets() bool {
 	for _, m := range g.modules {
 		if m == nil {

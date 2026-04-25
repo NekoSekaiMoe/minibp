@@ -21,6 +21,13 @@
 //   - out: Output language (go, java, py, or cc for C++)
 //   - plugins: protoc plugins to use
 //   - proto_paths: Include paths for proto imports
+//
+// Each custom/proto module type implements the BuildRule interface:
+//   - Name() string: Returns the module type name
+//   - NinjaRule(ctx) string: Returns ninja rule definitions
+//   - Outputs(m, ctx) []string: Returns output file paths
+//   - NinjaEdge(m, ctx) string: Returns ninja build edges
+//   - Desc(m, src) string: Returns a short description
 package ninja
 
 import (

@@ -6,6 +6,21 @@
 // organizing modules into levels where modules at each level can be
 // built in parallel. This enables efficient build parallelization
 // while respecting dependency ordering.
+//
+// Key features:
+//   - Graph data structure for module dependency tracking
+//   - Kahn's algorithm for topological sorting
+//   - Level-based grouping for parallel execution
+//   - Cycle detection with detailed error messages
+//
+// Topological sorting produces a build order where:
+//   - Dependencies are built before the modules that depend on them
+//   - Modules at the same level can be built in parallel
+//   - No circular dependencies exist
+//
+// This package is distinct from the dependency package:
+//   - dag: Handles module-to-module dependencies (what depends on what)
+//   - dependency: Handles library-level version constraints
 package dag
 
 import (

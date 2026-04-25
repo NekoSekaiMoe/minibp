@@ -22,6 +22,13 @@
 //   - Modules reference defaults via the `defaults: ["name"]` property
 //   - Properties from defaults are merged into the referencing module
 //   - Language-specific defaults apply only to matching module types
+//
+// Each meta-module type implements the BuildRule interface:
+//   - Name() string: Returns the module type name
+//   - NinjaRule(ctx) string: Returns ninja rule definitions (usually empty)
+//   - Outputs(m, ctx) []string: Returns output file paths (usually nil)
+//   - NinjaEdge(m, ctx) string: Returns ninja build edges (usually empty)
+//   - Desc(m, src) string: Returns a short description (usually empty)
 package ninja
 
 import (

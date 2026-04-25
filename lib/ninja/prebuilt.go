@@ -20,6 +20,13 @@
 //   - Uses "filename" or "stem" property if specified for output name
 //   - Otherwise derives name from source file or module name
 //   - Architecture suffix added for multi-arch support
+//
+// Each prebuilt module type implements the BuildRule interface:
+//   - Name() string: Returns the module type name
+//   - NinjaRule(ctx) string: Returns ninja rule definitions
+//   - Outputs(m, ctx) []string: Returns output file paths
+//   - NinjaEdge(m, ctx) string: Returns ninja build edges
+//   - Desc(m, src) string: Returns a short description
 package ninja
 
 import (

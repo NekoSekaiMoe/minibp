@@ -16,6 +16,13 @@
 //   - ccCompilerCmd: Get compiler command with optional ccache wrapper
 //   - ltoFlags: Get LTO flags for compilation and linking
 //   - ltoArchiveCmd: Get appropriate archiver for LTO static libraries
+//
+// Each module type implements the BuildRule interface:
+//   - Name() string: Returns the module type name
+//   - NinjaRule(ctx) string: Returns ninja rule definitions
+//   - Outputs(m, ctx) []string: Returns output file paths
+//   - NinjaEdge(m, ctx) string: Returns ninja build edges
+//   - Desc(m, src) string: Returns a short description
 package ninja
 
 import (
@@ -110,6 +117,14 @@ func (r *ccLibrary) Name() string { return "cc_library" }
 
 // NinjaRule defines the ninja compilation, archiving, and linking rules for C/C++ libraries.
 //
+// The generated rules include:
+//   - cc_compile: Standard C/C++ compilation with dependency tracking
+//   - cc_compile_lto: Compilation with LTO enabled
+//   - cc_archive: Archive static library from object files
+//   - cc_shared: Link shared library from object files
+//   - cc_link_lto: Link with LTO enabled
+//   - thinlto_codegen: Generate thin LTO intermediate files
+//
 // Parameters:
 //   - ctx: Rule render context with toolchain and flags
 //
@@ -150,6 +165,13 @@ rule thinlto_codegen
 // For shared libraries (with "shared" property), returns lib{name}{suffix}.so.
 // For static libraries, returns lib{name}{suffix}.a.
 // Returns nil if the module has no name.
+//
+// Parameters:
+//   - m: Module being evaluated
+//   - ctx: Rule render context with architecture suffix
+//
+// Returns:
+//   - List containing the library output path
 func (r *ccLibrary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
@@ -171,6 +193,23 @@ func (r *ccLibrary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 // For shared libraries, it links object files into a shared object (.so).
 // For static libraries, it archives object files into a static archive (.a).
 // When LTO is "thin", it also generates thinlto_codegen edges for intermediate object files.
+//
+// Parameters:
+//   - m: Module being evaluated
+//   - ctx: Rule render context with toolchain and flags
+//
+// Returns:
+//   - Ninja build edge string for compilation and linking
+//
+// Build algorithm:
+//  1. Get module name and source files
+//  2. Exit early if name or sources are missing
+//  3. Determine compiler type (C vs C++) from file extensions
+//  4. Select compile rule (cc_compile or cc_compile_lto)
+//  5. Collect shared library dependencies
+//  6. Generate compile edges for each source file
+//  7. Generate archive/link edge for final library
+//  8. Generate thinlto_codegen edges if LTO is "thin"
 func (r *ccLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
@@ -719,6 +758,32 @@ func (r *ccLibraryHeaders) Outputs(m *parser.Module, ctx RuleRenderContext) []st
 func (r *ccLibraryHeaders) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string { return "" }
 func (r *ccLibraryHeaders) Desc(m *parser.Module, srcFile string) string             { return "" }
 
+// ccTestEdge generates a ninja build edge for a C/C++ test executable.
+// This is a helper function used by the ccTestRule type to generate the
+// actual build edges. It compiles source files and links them into a test binary.
+// The test binary has the ".test" suffix and includes test-specific configurations.
+//
+// Build algorithm:
+//  1. Get module name and source files
+//  2. Exit early if missing name or sources
+//  3. Determine compiler type (C vs C++) from file extensions
+//  4. Generate compile rule (cc_compile or cc_compile_lto)
+//  5. Collect library dependencies from deps and shared_libs
+//  6. Generate compile edges for each source file
+//  7. Generate link edge with all inputs
+//  8. Generate thinlto_codegen edges if LTO is "thin"
+//
+// Parameters:
+//   - m: Module being evaluated
+//   - ctx: Rule rendering context with toolchain and flags
+//
+// Returns:
+//   - Ninja build edge string for test compilation and linking
+//
+// Edge cases:
+//   - Empty srcs: Returns "" (nothing to compile)
+//   - Missing name: Returns "" (cannot determine output path)
+//   - LTO "thin": Generates additional thinlto_codegen edges
 func ccTestEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)

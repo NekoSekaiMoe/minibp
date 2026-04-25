@@ -17,6 +17,13 @@
 // Edge cases:
 //   - Output directory uses the group name as directory path
 //   - Each file is copied individually preserving its basename
+//
+// filegroup implements the BuildRule interface:
+//   - Name() string: Returns "filegroup"
+//   - NinjaRule(ctx) string: Returns ninja rule definition
+//   - Outputs(m, ctx) []string: Returns output directory paths
+//   - NinjaEdge(m, ctx) string: Returns ninja build edges
+//   - Desc(m, src) string: Returns a short description
 package ninja
 
 import (

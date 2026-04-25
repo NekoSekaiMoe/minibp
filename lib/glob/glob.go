@@ -1,10 +1,22 @@
 // Package glob provides glob pattern expansion for Blueprint source file properties.
-// It handles two types of glob patterns:
+// It handles two types of glob patterns commonly used in build systems for specifying
+// source files:
 //   - Simple globs: *.go, ?.txt, [abc].* (using filepath.Match)
 //   - Recursive globs: **/*.go, src/**/*.java (walking directory tree)
 //
 // This package is used by the build system to expand source file patterns
-// in module srcs properties into concrete file lists.
+// in module srcs properties into concrete file lists. This allows build rules
+// to specify sources with patterns like "src/**/*.cpp" rather than listing
+// every individual source file.
+//
+// Simple globs use standard filepath.Match patterns:
+//   - * matches any sequence of characters (except path separator)
+//   - ? matches any single character
+//   - [abc] matches any character in the set
+//
+// Recursive globs use ** to match zero or more directory levels:
+//   - ** matches any number of path segments
+//   - src/**/*.java matches java files in src and any subdirectory
 package glob
 
 import (
@@ -17,8 +29,13 @@ import (
 // ExpandInModule expands glob patterns in the "srcs" property of a module.
 // It processes each source file pattern in the module's srcs list and expands
 // glob patterns (using * and **) into matching file paths.
-// Non-glob patterns are preserved as-is.
+// Non-glob patterns (paths without *) are preserved as-is.
 // Duplicates are automatically removed from the expanded results.
+//
+// This function is called during the build graph construction phase to resolve
+// source file patterns to concrete file paths before generating ninja rules.
+// It ensures that the ninja build file has complete information about
+// all source files needed for compilation.
 //
 // The function iterates through the module's properties looking for "srcs",
 // then processes each value in the srcs list. Patterns containing "*"
@@ -41,6 +58,7 @@ import (
 //   - Empty srcs list returns nil with no modifications.
 //   - Patterns matching no files are preserved as-is (no error).
 //   - Multiple identical source paths are deduplicated.
+//   - If a pattern starts with "//" (absolute path), baseDir is ignored.
 func ExpandInModule(m *parser.Module, baseDir string) error {
 	if m.Map == nil {
 		return nil
@@ -92,7 +110,13 @@ func ExpandInModule(m *parser.Module, baseDir string) error {
 //   - Recursive globs (**) which are expanded by walking the directory tree.
 //
 // The function determines the pattern type by checking for "**" and routes
-// to the appropriate expansion method.
+// to the appropriate expansion method. Recursive globs are more expensive
+// as they require walking the directory tree, so simple globs are preferred
+// when possible.
+//
+// For simple globs, filepath.Glob is used which is highly optimized.
+// For recursive globs, filepath.Walk is used to traverse directories,
+// and each file is checked against the recursive pattern.
 //
 // Parameters:
 //   - pattern: The glob pattern to expand (e.g., "*.go", "src/**/*.go").
@@ -108,6 +132,7 @@ func ExpandInModule(m *parser.Module, baseDir string) error {
 //   - Pattern with ** but no files matching returns empty slice.
 //   - Pattern starting with ** is valid and matches all files in baseDir.
 //   - Hidden files (starting with .) are included in matches.
+//   - Symlinks are followed during directory walking.
 func expandGlob(pattern, baseDir string) ([]string, error) {
 	var result []string
 
