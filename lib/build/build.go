@@ -471,9 +471,24 @@ func pathPrefixForOutput(srcDir, outFile string) string {
 // Returns:
 //   - string: Complete regeneration command
 func buildRegenCmd(opts Options) string {
-	regenCmd := os.Args[0] + " -o " + opts.OutFile
-	for _, f := range opts.Inputs {
-		regenCmd += " " + f
+	regenCmd := os.Args[0]
+	if opts.Arch != "" {
+		regenCmd += " -arch " + opts.Arch
+	}
+	if opts.Host {
+		regenCmd += " -host"
+	}
+	// Add -a flag if scanning a directory
+	if len(opts.Inputs) == 1 {
+		// Check if input is a directory
+		fi, err := os.Stat(opts.Inputs[0])
+		if err == nil && fi.IsDir() {
+			regenCmd += " -a"
+		}
+	}
+	regenCmd += " -o " + opts.OutFile
+	if len(opts.Inputs) > 0 {
+		regenCmd += " " + strings.Join(opts.Inputs, " ")
 	}
 	return regenCmd
 }

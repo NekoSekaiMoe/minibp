@@ -109,6 +109,15 @@ cc_binary {
     srcs: ["demo.c"],
 }
 
+cc_binary {
+    name: "testapp",
+    srcs: select((arch(), os()), {
+        ("arm64", "linux"): ["arm64.c"],
+        ("x86_64", "linux"): ["x64.c"],
+        default: ["default.c"],
+    }),
+}
+
 // Simple C++ demo
 cc_binary {
     name: "demo_cpp",

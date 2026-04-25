@@ -189,35 +189,7 @@ func ParseRunConfig(args []string, stderr io.Writer) (RunConfig, error) {
 }
 
 // NewEvaluatorFromConfig creates a parser.Evaluator configured with values from
-// the given RunConfig.
-//
-// This function initializes a new Evaluator and registers config values
-// derived from the RunConfig. The evaluator is used during Blueprint
-// parsing to resolve select() expressions and property variable references.
-//
-// Config Values Set:
-//   - arch: Target architecture from cfg.Arch (e.g., "arm64", "x86_64").
-//     Maps to Blueprint config "arch".
-//   - host: String representation of cfg.Host boolean ("true" or "false").
-//     Maps to Blueprint config "host". True when -host flag is set.
-//   - os: Target OS from cfg.TargetOS. Defaults to "linux" if not specified.
-//     Maps to Blueprint config "os".
-//   - target: Alias for arch (duplicated for compatibility).
-//   - variant.<key>: Each variant selector from cfg.Variant (format: key=value).
-//     Parsed and set as config "variant.<key>".
-//   - product.<key>: Each product variable from cfg.Product (format: key=value).
-//     Parsed and set as config "product.<key>".
-//
-// Example cfg.Variant "image=recovery,link=shared" sets:
-//   - variant.image = "recovery"
-//   - variant.link = "shared"
-//
-// These config values are available in Blueprint select() expressions:
-//
-//	select([
-//	    { arch == "arm64" && variant.image == "recovery" },
-//	    "arm64_recovery",
-//	])
+// the run configuration (CLI flags).
 func NewEvaluatorFromConfig(cfg RunConfig) *parser.Evaluator {
 	eval := parser.NewEvaluator()
 	eval.SetConfig("arch", cfg.Arch)

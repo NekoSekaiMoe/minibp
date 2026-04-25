@@ -701,21 +701,7 @@ func (e *Evaluator) isConfigUnset(val interface{}) bool {
 
 // evalSelectCondition evaluates a select condition.
 // Conditions can be:
-//   - Empty: uses the first argument as the value
-//   - Built-in functions: target, arch, host, os - look up from config
-//   - soong_config_variable(namespace, variable): Soong config variable
-//   - release_flag(flag): Release flag value
-//   - variant(name): Variant-specific value
-//   - product_variable(name): Product variable value
-//   - Custom: any other identifier looks up from config or vars
-//
-// Parameters:
-//   - cond: The condition to evaluate
-//
-// Returns:
-//   - interface{}: The evaluated condition value
 func (e *Evaluator) evalSelectCondition(cond ConfigurableCondition) interface{} {
-	// Empty condition function - use argument as value
 	if cond.FunctionName == "" {
 		if len(cond.Args) == 0 {
 			return nil
