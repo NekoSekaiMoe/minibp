@@ -11,6 +11,7 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	buildlib "minibp/lib/build"
@@ -192,14 +193,22 @@ func ParseRunConfig(args []string, stderr io.Writer) (RunConfig, error) {
 // the run configuration (CLI flags).
 func NewEvaluatorFromConfig(cfg RunConfig) *parser.Evaluator {
 	eval := parser.NewEvaluator()
-	eval.SetConfig("arch", cfg.Arch)
+	
+	// When -host is set, use the current system's architecture
+	// This allows select((arch(), os()), ...) to work with -host
+	arch := cfg.Arch
+	if cfg.Host {
+		arch = runtime.GOARCH
+	}
+	
+	eval.SetConfig("arch", arch)
 	eval.SetConfig("host", fmt.Sprintf("%v", cfg.Host))
 	if cfg.TargetOS != "" {
 		eval.SetConfig("os", cfg.TargetOS)
 	} else {
 		eval.SetConfig("os", "linux")
 	}
-	eval.SetConfig("target", cfg.Arch)
+	eval.SetConfig("target", arch)
 	setKeyValueConfigs(eval, "variant.", cfg.Variant)
 	setKeyValueConfigs(eval, "product.", cfg.Product)
 	return eval
