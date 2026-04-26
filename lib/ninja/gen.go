@@ -47,6 +47,13 @@ import (
 // Graph is the interface needed for ninja generation.
 // It provides the topological sort of module dependencies,
 // allowing parallel builds within each level while maintaining correct build order.
+//
+// TopoSort returns modules organized by "levels" where:
+//   - Modules in each level can be built in parallel
+//   - Levels must be built sequentially (level N depends on level N-1)
+//
+// Implementation in lib/dag provides the topological sort
+// algorithm that groups modules by their dependency distance.
 type Graph interface {
 	// TopoSort returns modules organized by build level.
 	// Each level can be built in parallel, but levels must be built in order.
@@ -113,8 +120,9 @@ type Toolchain struct {
 // Returns:
 //   - Generator with default settings (sourceDir=".", outputDir=".")
 //
-// The generator is configured with default directories and must have SetSourceDir
-// and SetOutputDir called before generating if non-default paths are needed.
+// Note:
+//   The generator is configured with default directories and must have SetSourceDir
+//   and SetOutputDir called before generating if non-default paths are needed.
 func NewGenerator(g Graph, rules map[string]BuildRule, modules map[string]*parser.Module) *Generator {
 	return &Generator{
 		graph:     g,
@@ -130,6 +138,8 @@ func NewGenerator(g Graph, rules map[string]BuildRule, modules map[string]*parse
 //
 // Parameters:
 //   - dir: Absolute or relative path to source directory
+//
+// Returns: None
 func (g *Generator) SetSourceDir(dir string) {
 	g.sourceDir = dir
 }

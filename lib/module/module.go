@@ -135,8 +135,13 @@ type Module interface {
 //   - Adding type-specific fields without duplicating code
 //   - Maintaining the Module interface through embedding
 //
-// Fields use trailing underscores (Name_, Type_, etc.) to avoid conflicts
-// with method names in embedding types that might want to use the same names.
+// Note:
+//   - Fields use trailing underscores (Name_, Type_, etc.) to avoid conflicts
+//     with method names in embedding types that might want to use the same names
+//
+// Edge cases:
+//   - Zero-value BaseModule is valid but Name() will return empty string
+//   - Nil Srcs_ or Deps_ slices are replaced with empty slices by factories
 type BaseModule struct {
 	// Name_ is the module name, unique within its package.
 	// Set from the "name" property in the Blueprint definition.

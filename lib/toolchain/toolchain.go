@@ -102,9 +102,13 @@ type ToolchainConfig struct {
 // default toolchain tool names (gcc, g++, ar, ld) and initializes
 // an empty toolchain cache.
 //
-// Returns a pointer to a new ToolchainConfig ready for use.
-// The returned instance must be used to detect toolchains via
-// DetectToolchain method.
+// Returns:
+//   - *ToolchainConfig: A pointer to a new ToolchainConfig ready for use.
+//     The returned instance must be used to detect toolchains via
+//     DetectToolchain method.
+//
+// Note: The returned instance starts with an empty cache. Call
+// DetectToolchain to populate the cache with toolchain configurations.
 func NewToolchainConfig() *ToolchainConfig {
 	return &ToolchainConfig{
 		defaultCC:  "gcc",
@@ -287,6 +291,8 @@ func (tc *ToolchainConfig) getToolchainPrefix(arch Architecture, targetOS OS) st
 //
 // Returns:
 //   - bool: True if the tool exists and is executable, false otherwise
+//
+// Note: This is a convenience method that wraps findExecutable.
 func (tc *ToolchainConfig) toolExists(name string) bool {
 	_, err := tc.findExecutable(name)
 	return err == nil
@@ -302,6 +308,8 @@ func (tc *ToolchainConfig) toolExists(name string) bool {
 // Returns:
 //   - string: Full path to the executable if found
 //   - error: Error if not found
+//
+// Note: This method exists to allow dependency injection in tests.
 func (tc *ToolchainConfig) findExecutable(name string) (string, error) {
 	return execLookup(name)
 }
@@ -347,6 +355,9 @@ func execLookup(name string) (string, error) {
 //   - -m32 or -m64 flag for x86 architectures
 //   - --sysroot flag if Sysroot is set in the Toolchain
 //
+// Parameters:
+//   - (none)
+//
 // Returns:
 //   - []string: Slice of compiler flag strings
 //
@@ -390,6 +401,9 @@ func (t *Toolchain) GetCompileFlags() []string {
 //   - -m32 or -m64 flag for x86 architectures
 //   - --sysroot flag if Sysroot is set in the Toolchain
 //
+// Parameters:
+//   - (none)
+//
 // Returns:
 //   - []string: Slice of linker flag strings
 //
@@ -430,6 +444,9 @@ func (t *Toolchain) GetLinkFlags() []string {
 //
 // Example: "arm64-android", "x86_64-linux"
 //
+// Parameters:
+//   - (none)
+//
 // Returns:
 //   - string: Prefix string in format "architecture-os"
 func (t *Toolchain) GetOutputPrefix() string {
@@ -438,6 +455,9 @@ func (t *Toolchain) GetOutputPrefix() string {
 
 // Validate checks if the Toolchain configuration is valid by
 // verifying that both architecture and operating system are set.
+//
+// Parameters:
+//   - (none)
 //
 // Returns:
 //   - error: Nil if valid, otherwise an error describing the validation failure
@@ -461,6 +481,9 @@ func (t *Toolchain) Validate() error {
 // and the C/C++ compiler paths.
 //
 // Example: "arm64-android (aarch64-linux-android-gcc/aarch64-linux-android-g++)"
+//
+// Parameters:
+//   - (none)
 //
 // Returns:
 //   - string: String representation of the toolchain

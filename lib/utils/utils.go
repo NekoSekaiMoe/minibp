@@ -188,6 +188,20 @@ func ParseRunConfig(args []string, stderr io.Writer) (RunConfig, error) {
 
 // NewEvaluatorFromConfig creates a parser.Evaluator configured with values from
 // the run configuration (CLI flags).
+//
+// This function sets up the evaluator with build configuration variables
+// that are used during Blueprint expression evaluation. It configures the
+// arch, host, os, target, variant.* and product.* variables based on
+// the RunConfig fields.
+//
+// Parameters:
+//   - cfg: RunConfig containing CLI flag values
+//
+// Returns:
+//   - *parser.Evaluator: Configured evaluator ready for Blueprint parsing
+//
+// Note: Variant and Product selectors are only used by the Evaluator
+// during Blueprint parsing, not by the build pipeline.
 func NewEvaluatorFromConfig(cfg RunConfig) *parser.Evaluator {
 	eval := parser.NewEvaluator()
 	
@@ -265,7 +279,13 @@ func (cfg RunConfig) BuildOptions() buildlib.Options {
 // or during release builds), "unknown" is used instead of the commit hash.
 // If build date cannot be determined, defaults to "2026-04-21".
 //
-// This function is typically called when the -v flag is passed to display
+// Parameters:
+//   - (none)
+//
+// Returns:
+//   - string: Formatted version string
+//
+// Note: This function is typically called when the -v flag is passed to display
 // version information before parsing Blueprints.
 func GetVersion() string {
 	v := version.Get()
@@ -292,9 +312,12 @@ func GetVersion() string {
 //   - Using a release archive without embedded version info
 //   - In containers or CI environments without git
 //
+// Parameters:
+//   - (none)
+//
 // Returns:
-//   - Short git commit hash (7 characters)
-//   - Error if git fails (not installed, not in git repo, or detached head)
+//   - string: Short git commit hash (7 characters)
+//   - error: Error if git fails (not installed, not in git repo, or detached head)
 //
 // Edge cases:
 //   - Returns error if not in a git repository (no .git directory)

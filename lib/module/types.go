@@ -351,8 +351,11 @@ func baseModuleFromAST(ast *parser.Module, eval *parser.Evaluator) BaseModule {
 //   - includes: Include directories for the compiler (e.g., "-Iinclude")
 //   - ldflags: Additional linker flags (e.g., "-lpthread")
 //
-// Embedded type:
-//   - BaseModule: Provides Name, Type, Srcs, Deps, Props
+// Note:
+//   - Embedded BaseModule provides Name, Type, Srcs, Deps, Props
+//
+// Edge cases:
+//   - CFlags, Includes, and LDFlags may be empty slices if properties not defined
 type CCLibrary struct {
 	BaseModule
 	// CFlags contains additional C/C++ compiler flags.
@@ -389,6 +392,9 @@ type CCLibraryFactory struct{}
 // Returns:
 //   - A configured CCLibrary with C/C++ specific fields populated
 //   - Error is never returned by this implementation (all properties are optional)
+//
+// Note:
+//   - CFlags, Includes, and LDFlags may be empty slices if properties not defined
 func (f *CCLibraryFactory) Create(ast *parser.Module, eval *parser.Evaluator) (Module, error) {
 	m := &CCLibrary{
 		BaseModule: baseModuleFromAST(ast, eval),
@@ -412,6 +418,12 @@ func (f *CCLibraryFactory) Create(ast *parser.Module, eval *parser.Evaluator) (M
 //   - includes: Include directories for the compiler
 //   - ldflags: Additional linker flags
 //   - static: Whether to link all dependencies statically (boolean)
+//
+// Note:
+//   - Embedded BaseModule provides Name, Type, Srcs, Deps, Props
+//
+// Edge cases:
+//   - Static field defaults to false if not explicitly set in Blueprint
 type CCBinary struct {
 	BaseModule
 	// CFlags contains additional C/C++ compiler flags.
@@ -441,6 +453,9 @@ type CCBinaryFactory struct{}
 //
 // Returns:
 //   - A configured CCBinary with C/C++ specific fields populated
+//   - Error is never returned by this implementation (all properties are optional)
+//
+// Note:
 //   - The Static field is false if not explicitly set in the Blueprint
 func (f *CCBinaryFactory) Create(ast *parser.Module, eval *parser.Evaluator) (Module, error) {
 	m := &CCBinary{
@@ -473,6 +488,12 @@ func (f *CCBinaryFactory) Create(ast *parser.Module, eval *parser.Evaluator) (Mo
 //   - importpath: The import path for go mod (e.g., "example.com/lib/foo")
 //   - goflags: Go compiler flags (e.g., "-gcflags=-B")
 //   - ldflags: Go linker flags (e.g., "-s -w")
+//
+// Note:
+//   - Embedded BaseModule provides Name, Type, Srcs, Deps, Props
+//
+// Edge cases:
+//   - Missing optional properties result in empty strings or empty slices
 type GoLibrary struct {
 	BaseModule
 	// PackagePath is the filesystem path to the Go package.
@@ -506,6 +527,10 @@ type GoLibraryFactory struct{}
 //
 // Returns:
 //   - A configured GoLibrary with Go-specific fields populated
+//   - Error is never returned by this implementation (all properties are optional)
+//
+// Edge cases:
+//   - Missing optional properties result in empty strings or empty slices
 func (f *GoLibraryFactory) Create(ast *parser.Module, eval *parser.Evaluator) (Module, error) {
 	m := &GoLibrary{
 		BaseModule:  baseModuleFromAST(ast, eval),
@@ -532,6 +557,12 @@ func (f *GoLibraryFactory) Create(ast *parser.Module, eval *parser.Evaluator) (M
 //   - importpath: The import path for go mod
 //   - goflags: Go compiler flags
 //   - ldflags: Go linker flags
+//
+// Note:
+//   - Embedded BaseModule provides Name, Type, Srcs, Deps, Props
+//
+// Edge cases:
+//   - go_test produces a binary that links the test package (not the main package)
 type GoBinary struct {
 	BaseModule
 	// PackagePath is the filesystem path to the Go package.
@@ -549,7 +580,7 @@ type GoBinary struct {
 type GoBinaryFactory struct{}
 
 // Create instantiates a GoBinary from a parsed AST module.
-// Parameters are identical to GoLibraryFactory.
+// It extracts the "pkg", "importpath", "goflags", and "ldflags" properties.
 //
 // Parameters:
 //   - ast: The parser.Module AST node containing all module properties
@@ -557,6 +588,7 @@ type GoBinaryFactory struct{}
 //
 // Returns:
 //   - A configured GoBinary with Go-specific fields populated
+//   - Error is never returned by this implementation (all properties are optional)
 func (f *GoBinaryFactory) Create(ast *parser.Module, eval *parser.Evaluator) (Module, error) {
 	m := &GoBinary{
 		BaseModule:  baseModuleFromAST(ast, eval),
@@ -582,6 +614,12 @@ func (f *GoBinaryFactory) Create(ast *parser.Module, eval *parser.Evaluator) (Mo
 // Common properties:
 //   - package: The Java package name (e.g., "com.example.lib")
 //   - resource_dirs: Directories containing resources (images, config files, etc.)
+//
+// Note:
+//   - Embedded BaseModule provides Name, Type, Srcs, Deps, Props
+//
+// Edge cases:
+//   - Missing optional properties result in empty strings or empty slices
 type JavaLibrary struct {
 	BaseModule
 	// PackageName is the Java package name.
@@ -607,6 +645,10 @@ type JavaLibraryFactory struct{}
 //
 // Returns:
 //   - A configured JavaLibrary with Java-specific fields populated
+//   - Error is never returned by this implementation (all properties are optional)
+//
+// Edge cases:
+//   - Missing optional properties result in empty strings or empty slices
 func (f *JavaLibraryFactory) Create(ast *parser.Module, eval *parser.Evaluator) (Module, error) {
 	m := &JavaLibrary{
 		BaseModule:   baseModuleFromAST(ast, eval),
@@ -625,6 +667,12 @@ func (f *JavaLibraryFactory) Create(ast *parser.Module, eval *parser.Evaluator) 
 //   - package: The Java package name
 //   - main_class: The fully qualified class name with main() method
 //   - resource_dirs: Directories containing resources
+//
+// Note:
+//   - Embedded BaseModule provides Name, Type, Srcs, Deps, Props
+//
+// Edge cases:
+//   - Missing optional properties result in empty strings or empty slices
 type JavaBinary struct {
 	BaseModule
 	// PackageName is the Java package name.
@@ -650,6 +698,10 @@ type JavaBinaryFactory struct{}
 //
 // Returns:
 //   - A configured JavaBinary with Java-specific fields populated
+//   - Error is never returned by this implementation (all properties are optional)
+//
+// Edge cases:
+//   - Missing optional properties result in empty strings or empty slices
 func (f *JavaBinaryFactory) Create(ast *parser.Module, eval *parser.Evaluator) (Module, error) {
 	m := &JavaBinary{
 		BaseModule:   baseModuleFromAST(ast, eval),
@@ -679,6 +731,12 @@ func (f *JavaBinaryFactory) Create(ast *parser.Module, eval *parser.Evaluator) (
 //   - plugins: List of code generator plugins (e.g., "java", "cpp", "go")
 //   - out: Output type for code generation (e.g., "lite", "proto")
 //   - include_dirs: Additional include directories for proto imports
+//
+// Note:
+//   - Embedded BaseModule provides Name, Type, Srcs, Deps, Props
+//
+// Edge cases:
+//   - Missing optional properties result in empty strings or empty slices
 type ProtoLibrary struct {
 	BaseModule
 	// ProtoSrcs contains source .proto files to compile.
@@ -709,6 +767,10 @@ type ProtoLibraryFactory struct{}
 //
 // Returns:
 //   - A configured ProtoLibrary with proto-specific fields populated
+//   - Error is never returned by this implementation (all properties are optional)
+//
+// Edge cases:
+//   - Missing optional properties result in empty strings or empty slices
 func (f *ProtoLibraryFactory) Create(ast *parser.Module, eval *parser.Evaluator) (Module, error) {
 	m := &ProtoLibrary{
 		BaseModule:  baseModuleFromAST(ast, eval),
@@ -734,6 +796,12 @@ func (f *ProtoLibraryFactory) Create(ast *parser.Module, eval *parser.Evaluator)
 //   - plugins: List of code generator plugins to use
 //   - out: Output type specification
 //   - include_dirs: Additional include directories for proto imports
+//
+// Note:
+//   - Embedded BaseModule provides Name, Type, Srcs, Deps, Props
+//
+// Edge cases:
+//   - Missing optional properties result in empty strings or empty slices
 type ProtoGen struct {
 	BaseModule
 	// ProtoSrcs contains source .proto files to process.
@@ -758,6 +826,10 @@ type ProtoGenFactory struct{}
 //
 // Returns:
 //   - A configured ProtoGen with proto-specific fields populated
+//   - Error is never returned by this implementation (all properties are optional)
+//
+// Edge cases:
+//   - Missing optional properties result in empty strings or empty slices
 func (f *ProtoGenFactory) Create(ast *parser.Module, eval *parser.Evaluator) (Module, error) {
 	m := &ProtoGen{
 		BaseModule:  baseModuleFromAST(ast, eval),
@@ -785,6 +857,10 @@ func (f *ProtoGenFactory) Create(ast *parser.Module, eval *parser.Evaluator) (Mo
 //
 // The Custom type stores everything in the generic Props_ map and relies
 // on the ninja generator to handle any custom properties appropriately.
+//
+// Note:
+//   - Embedded BaseModule provides Name, Type, Srcs, Deps, Props
+//   - The type serves as a catch-all for modules without specific implementations
 type Custom struct {
 	BaseModule
 }
@@ -802,6 +878,10 @@ type CustomFactory struct{}
 //
 // Returns:
 //   - A configured Custom with all properties in the Props_ map
+//   - Error is never returned by this implementation
+//
+// Note:
+//   - The Custom type is a catch-all for modules without specific implementations
 func (f *CustomFactory) Create(ast *parser.Module, eval *parser.Evaluator) (Module, error) {
 	m := &Custom{
 		BaseModule: baseModuleFromAST(ast, eval),

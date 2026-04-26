@@ -16,6 +16,14 @@ import (
 // Info holds namespace metadata extracted from a soong_namespace module.
 // It contains the list of namespace imports that define which other
 // namespaces are visible within this namespace's scope.
+//
+// Note:
+//   - Imports list may be empty if the namespace has no import declarations
+//   - The namespace itself is not included in its own Imports list
+//
+// Edge cases:
+//   - Empty Imports slice indicates no other namespaces are imported
+//   - Namespace without imports property results in empty Imports
 type Info struct {
 	// Imports is a list of namespace names that are imported into
 	// this namespace, allowing modules in those namespaces to be

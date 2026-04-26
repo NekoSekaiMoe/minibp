@@ -31,6 +31,18 @@ import (
 //   - cache: In-memory cache of computed hashes for current session
 //   - hashDir: Directory path for persistent hash storage
 //   - moduleHashes: Current hashes for each module (computed this run)
+//
+// Example:
+//
+//	h := NewHasher("/path/to/build")
+//	hash, err := h.CalculateModuleHash(module, allModules)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	rebuild, err := h.NeedsRebuild(moduleName)
+//	if rebuild {
+//	    // Rebuild module
+//	}
 type Hasher struct {
 	cache        map[string]string // module hash cache: module name -> cached hash
 	hashDir      string            // hash storage directory path for persistent hash storage
@@ -500,6 +512,22 @@ func (h *Hasher) NeedsRebuild(moduleName string) (bool, error) {
 //
 // Returns:
 //   - error: Non-nil if directory creation or file write fails
+// sanitizeHashPath sanitizes a module name for use as a filename.
+//
+// This function prevents path traversal attacks by replacing path separators
+// with underscores and handling edge cases like names starting with "..".
+// The sanitized name is safe to use in file paths without directory escape.
+//
+// Parameters:
+//   - name: The module name to sanitize.
+//
+// Returns:
+//   - string: The sanitized module name safe for use as a filename.
+//
+// Edge cases:
+//   - Path separators (/ and \) are replaced with underscores.
+//   - Names starting with ".." have those characters replaced.
+//   - Other special characters are preserved unchanged.
 func sanitizeHashPath(name string) string {
 	name = strings.Map(func(r rune) rune {
 		if r == '/' || r == '\\' {
@@ -513,6 +541,25 @@ func sanitizeHashPath(name string) string {
 	return name
 }
 
+// StoreHash stores the hash for a module to disk.
+//
+// This function writes the hash to a file in the hash storage directory.
+// The file is named <moduleName>.hash and contains the plain text hash.
+//
+// The hash directory is created if it doesn't exist. Path traversal protection
+// ensures module names cannot escape the hash directory.
+//
+// Parameters:
+//   - moduleName: Module name (used as filename)
+//   - hash: Hex-encoded hash string to store
+//
+// Returns:
+//   - error: Non-nil if directory creation or file write fails
+//
+// Edge cases:
+//   - Path separators in moduleName are sanitized to underscores.
+//   - Module names starting with ".." are prefixed with additional underscores.
+//   - Path traversal attempts return an error.
 func (h *Hasher) StoreHash(moduleName, hash string) error {
 	if err := os.MkdirAll(h.hashDir, 0755); err != nil {
 		return err
@@ -574,6 +621,12 @@ func (h *Hasher) LoadHash(moduleName string) (string, error) {
 // This is useful when module configurations change and in-memory
 // caches may be stale, while still preserving persisted hashes for
 // comparison purposes.
+//
+// Parameters:
+//   - none
+//
+// Returns:
+//   - none
 func (h *Hasher) ClearCache() {
 	h.cache = make(map[string]string)
 }
