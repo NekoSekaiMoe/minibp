@@ -4,6 +4,7 @@
 package hasher
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -289,14 +290,10 @@ func (h *Hasher) hashFile(path string, w io.Writer) error {
 	}
 	defer f.Close()
 
-	// Write file path (for detecting file changes/moves).
 	fmt.Fprintf(w, "file:%s;", path)
 
-	// Calculate and write file content hash.
-	// We use a separate hasher for file contents to handle large files
-	// efficiently (streaming copy).
 	fileHasher := sha256.New()
-	if _, err := io.Copy(fileHasher, f); err != nil {
+	if _, err := io.Copy(fileHasher, bufio.NewReaderSize(f, 32*1024)); err != nil {
 		return err
 	}
 
@@ -503,15 +500,36 @@ func (h *Hasher) NeedsRebuild(moduleName string) (bool, error) {
 //
 // Returns:
 //   - error: Non-nil if directory creation or file write fails
+func sanitizeHashPath(name string) string {
+	name = strings.Map(func(r rune) rune {
+		if r == '/' || r == '\\' {
+			return '_'
+		}
+		return r
+	}, name)
+	if strings.HasPrefix(name, "..") {
+		name = strings.Replace(name, "..", "__", -1)
+	}
+	return name
+}
+
 func (h *Hasher) StoreHash(moduleName, hash string) error {
-	// Ensure directory exists.
-	// This creates all intermediate directories.
 	if err := os.MkdirAll(h.hashDir, 0755); err != nil {
 		return err
 	}
 
-	// Write hash file with mode 0644 (rw-r--r--).
-	hashFile := filepath.Join(h.hashDir, moduleName+".hash")
+	hashFile := filepath.Join(h.hashDir, sanitizeHashPath(moduleName)+".hash")
+	absPath, err := filepath.Abs(hashFile)
+	if err != nil {
+		return err
+	}
+	absDir, err := filepath.Abs(h.hashDir)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(absPath, absDir+string(filepath.Separator)) {
+		return fmt.Errorf("invalid module name: path traversal detected: %s", moduleName)
+	}
 	return os.WriteFile(hashFile, []byte(hash), 0644)
 }
 
@@ -526,7 +544,18 @@ func (h *Hasher) StoreHash(moduleName, hash string) error {
 //   - string: The stored hash string (trimmed of whitespace)
 //   - error: Non-nil if file doesn't exist or cannot be read
 func (h *Hasher) LoadHash(moduleName string) (string, error) {
-	hashFile := filepath.Join(h.hashDir, moduleName+".hash")
+	hashFile := filepath.Join(h.hashDir, sanitizeHashPath(moduleName)+".hash")
+	absPath, err := filepath.Abs(hashFile)
+	if err != nil {
+		return "", err
+	}
+	absDir, err := filepath.Abs(h.hashDir)
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(absPath, absDir+string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid module name: path traversal detected: %s", moduleName)
+	}
 
 	data, err := os.ReadFile(hashFile)
 	if err != nil {

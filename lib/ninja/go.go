@@ -25,6 +25,8 @@
 //   - Outputs(m, ctx) []string: Returns output file paths
 //   - NinjaEdge(m, ctx) string: Returns ninja build edges
 //   - Desc(m, src) string: Returns a short description
+//
+// This file provides Go compilation and linking rules for the Ninja build system.
 package ninja
 
 import (
@@ -145,12 +147,7 @@ func (r *goLibrary) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext,
 	out := fmt.Sprintf("%s%s.a", name, suffix)
 
 	var cmd string
-	if ldflags != "" {
-		cmd = fmt.Sprintf("go build -buildmode=archive -ldflags \"%s\" -o $out $in", ldflags)
-	} else {
-		cmd = "go build -buildmode=archive -o $out $in"
-	}
-
+	cmd = goBuildCmd(ldflags, "-buildmode=archive")
 	if envVar != "" {
 		cmd = envVar + " " + cmd
 	}
@@ -283,12 +280,7 @@ func (r *goBinary) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext, 
 	srcStr := strings.Join(srcs, " ")
 
 	var cmd string
-	if ldflags != "" {
-		cmd = fmt.Sprintf("go build -ldflags \"%s\" -o $out $in", ldflags)
-	} else {
-		cmd = "go build -o $out $in"
-	}
-
+	cmd = goBuildCmd(ldflags, "")
 	if envVar != "" {
 		cmd = envVar + " " + cmd
 	}
@@ -417,12 +409,7 @@ func (r *goTest) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext, go
 	out := fmt.Sprintf("%s%s.test", name, suffix)
 
 	var cmd string
-	if ldflags != "" {
-		cmd = fmt.Sprintf("go test -ldflags \"%s\" -c -o $out $pkg", ldflags)
-	} else {
-		cmd = "go test -c -o $out $pkg"
-	}
-
+	cmd = goTestCmd(ldflags)
 	if envVar != "" {
 		cmd = envVar + " " + cmd
 	}
@@ -436,7 +423,28 @@ func (r *goTest) Desc(m *parser.Module, srcFile string) string {
 	return "go test"
 }
 
-// goosAndArch returns the effective GOOS and GOARCH from context.
+func escapeLdflags(ldflags string) string {
+	ldflags = strings.ReplaceAll(ldflags, `\`, `\\`)
+	ldflags = strings.ReplaceAll(ldflags, `"`, `\"`)
+	ldflags = strings.ReplaceAll(ldflags, "$", `\$`)
+	ldflags = strings.ReplaceAll(ldflags, "`", "\\`")
+	ldflags = strings.ReplaceAll(ldflags, ";", `\;`)
+	return ldflags
+}
+
+func goBuildCmd(ldflags string, buildMode string) string {
+	if ldflags != "" {
+		return fmt.Sprintf("go build %s -ldflags \"%s\" -o $out $in", buildMode, escapeLdflags(ldflags))
+	}
+	return fmt.Sprintf("go build %s -o $out $in", buildMode)
+}
+
+func goTestCmd(ldflags string) string {
+	if ldflags != "" {
+		return fmt.Sprintf("go test -ldflags \"%s\" -c -o $out $pkg", escapeLdflags(ldflags))
+	}
+	return "go test -c -o $out $pkg"
+}
 // It also returns whether this is a cross-compilation scenario.
 // If goos/goarch are different from runtime, they're considered cross-compilation.
 //

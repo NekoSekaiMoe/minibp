@@ -23,6 +23,9 @@
 //   - libOutputName: Generate library output names
 //   - sharedLibOutputName: Generate .so library names
 //   - staticLibOutputName: Generate .a library names
+//
+// This file provides utility functions for property extraction and output name generation
+// used throughout the Ninja build system.
 package ninja
 
 import (
@@ -433,13 +436,19 @@ func formatSrcs(srcs []string) string {
 //
 // Returns:
 //   - Unique object file name (e.g., "mylib_foo.o")
+var srcNameReplacer = strings.NewReplacer(
+	"/", "_",
+	"\\", "_",
+	":", "_",
+	" ", "_",
+)
+
 func objectOutputName(moduleName, src string) string {
 	clean := filepath.Clean(src)
 	clean = strings.TrimPrefix(clean, "./")
 	clean = strings.TrimPrefix(clean, "../")
 	srcName := strings.TrimSuffix(clean, filepath.Ext(clean))
-	replacer := strings.NewReplacer("/", "_", "\\", "_", ":", "_", " ", "_")
-	srcName = replacer.Replace(srcName)
+	srcName = srcNameReplacer.Replace(srcName)
 	srcName = strings.Trim(srcName, "._")
 	if srcName == "" {
 		srcName = "obj"

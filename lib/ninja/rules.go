@@ -24,6 +24,9 @@
 //   - //visibility:any_partition: Visible to any partition
 //   - //package:__pkg__: Visible to current package
 //   - //package:__subpackages__: Visible to current package and subpackages
+//
+// This file provides the core interfaces and utilities for rule registration
+// and module property handling in the Ninja build system.
 package ninja
 
 import (

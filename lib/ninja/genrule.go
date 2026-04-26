@@ -28,6 +28,9 @@
 //   - Outputs(m, ctx) []string: Returns output file paths
 //   - NinjaEdge(m, ctx) string: Returns ninja build edges
 //   - Desc(m, src) string: Returns a short description
+//
+// This file provides a generic rule type for executing arbitrary commands
+// in the Ninja build system.
 package ninja
 
 import (
@@ -150,7 +153,7 @@ func (r *genrule) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 		edges.WriteString(fmt.Sprintf(" | %s", strings.Join(allDeps, " ")))
 	}
 	edges.WriteString("\n")
-	edges.WriteString(fmt.Sprintf(" cmd = %s\n", cmd))
+	edges.WriteString(fmt.Sprintf(" cmd = %s\n", shellEscape(cmd)))
 	return edges.String()
 }
 

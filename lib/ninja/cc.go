@@ -23,6 +23,9 @@
 //   - Outputs(m, ctx) []string: Returns output file paths
 //   - NinjaEdge(m, ctx) string: Returns ninja build edges
 //   - Desc(m, src) string: Returns a short description
+//
+// This file provides C/C++ compilation, archiving, and linking rules
+// for the Ninja build system.
 package ninja
 
 import (

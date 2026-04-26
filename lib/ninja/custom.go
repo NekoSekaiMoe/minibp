@@ -28,6 +28,9 @@
 //   - Outputs(m, ctx) []string: Returns output file paths
 //   - NinjaEdge(m, ctx) string: Returns ninja build edges
 //   - Desc(m, src) string: Returns a short description
+//
+// This file provides custom rule and protocol buffer support
+// for the Ninja build system.
 package ninja
 
 import (
@@ -117,19 +120,13 @@ func (r *customRule) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	}
 
-	out := outs[0]
-
-	// Replace $out and $in with actual paths in command
+out := outs[0]
 
 	inStr := strings.Join(srcs, " ")
+	escapedInStr := strings.Join(escapeList(srcs), " ")
 
 	actualCommand := strings.ReplaceAll(command, "$out", out)
-
 	actualCommand = strings.ReplaceAll(actualCommand, "$in", inStr)
-
-	// Escape paths for ninja build file
-
-	// Spaces become $ ", $ " becomes $ ", etc.
 
 	escapedOut := ninjaEscapePath(out)
 
@@ -145,7 +142,7 @@ func (r *customRule) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	edges.WriteString(fmt.Sprintf("build %s: custom_command %s\n", escapedOut, strings.Join(escapedSrcs, " ")))
 
-	edges.WriteString(fmt.Sprintf("  cmd = %s\n", actualCommand))
+	edges.WriteString(fmt.Sprintf("  cmd = %s\n", strings.ReplaceAll(actualCommand, "$in", escapedInStr)))
 
 	if flags != "" {
 
@@ -284,7 +281,15 @@ func (r *protoLibraryRule) NinjaEdge(m *parser.Module, ctx RuleRenderContext) st
 	protocCmd := "protoc"
 	if len(plugins) > 0 {
 		for _, plugin := range plugins {
-			protocCmd += fmt.Sprintf(" --plugin=%s", plugin)
+			protocCmd += fmt.Sprintf(" --plugin=%s", shellEscape(plugin))
+		}
+	}
+	edges.WriteString(fmt.Sprintf(" protoc = %s\n", protocCmd))
+
+	if len(protoPaths) > 0 {
+		edges.WriteString(fmt.Sprintf(" proto_path = --proto_path=%s", shellEscape(protoPaths[0])))
+		for i := 1; i < len(protoPaths); i++ {
+			edges.WriteString(fmt.Sprintf(" --proto_path=%s", shellEscape(protoPaths[i])))
 		}
 	}
 	edges.WriteString(fmt.Sprintf("  protoc = %s\n", protocCmd))

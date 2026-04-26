@@ -29,6 +29,9 @@
 //   - Outputs(m, ctx) []string: Returns output file paths (usually nil)
 //   - NinjaEdge(m, ctx) string: Returns ninja build edges (usually empty)
 //   - Desc(m, src) string: Returns a short description (usually empty)
+//
+// This file provides default property containers and meta-module types
+// for the Ninja build system.
 package ninja
 
 import (

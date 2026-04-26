@@ -24,9 +24,14 @@
 //
 // The Writer type provides methods for writing all Ninja syntax elements.
 // All output is written directly to the underlying writer without buffering.
+//
+// This file contains the Writer implementation for generating valid Ninja syntax.
+// Writer provides methods for rules, build edges, variables, comments, and phony targets.
 package ninja
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"strings"
@@ -71,7 +76,22 @@ type Writer struct {
 //	writer.Rule("cc", "gcc -c $in -o $out")
 //	writer.Build("main.o", "cc", []string{"main.c"}, nil)
 func NewWriter(w io.Writer) *Writer {
+	switch w.(type) {
+	case *bytes.Buffer, *strings.Builder:
+		// Don't buffer strings.Builder or bytes.Buffer
+	default:
+		if _, ok := w.(*bufio.Writer); !ok {
+			w = bufio.NewWriterSize(w, 64*1024)
+		}
+	}
 	return &Writer{w: w}
+}
+
+func (w *Writer) Flush() error {
+	if bw, ok := w.w.(*bufio.Writer); ok {
+		return bw.Flush()
+	}
+	return nil
 }
 
 // ninjaEscape escapes special characters in Ninja build file values.
@@ -93,13 +113,14 @@ func NewWriter(w io.Writer) *Writer {
 //   - Empty strings return empty strings
 //   - Already-escaped characters are double-escaped ($$ becomes $$$$)
 //   - Does not escape spaces (use ninjaEscapePath for paths)
+var ninjaEscapeReplacer = strings.NewReplacer(
+	"$", "$$",
+	":", "$:",
+	"#", "$#",
+)
+
 func ninjaEscape(s string) string {
-	replacer := strings.NewReplacer(
-		"$", "$$",
-		":", "$:",
-		"#", "$#",
-	)
-	return replacer.Replace(s)
+	return ninjaEscapeReplacer.Replace(s)
 }
 
 // ninjaEscapePath escapes a path for use in Ninja build files.
@@ -122,6 +143,26 @@ func ninjaEscape(s string) string {
 //	"$HOME/foo" -> "$$HOME/foo"
 func ninjaEscapePath(s string) string {
 	return strings.ReplaceAll(ninjaEscape(s), " ", "$ ")
+}
+
+func shellEscape(s string) string {
+	if s == "" {
+		return "''"
+	}
+	needsEscape := false
+	for _, c := range s {
+		if c == '\'' || c == '"' || c == '\\' || c == '$' || c == '`' ||
+			c == '!' || c == '|' || c == '&' || c == ';' || c == '<' || c == '>' ||
+			c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}' ||
+			c == '~' || c == '*' || c == '?' || c == '#' || c == '\n' || c == '\r' {
+			needsEscape = true
+			break
+		}
+	}
+	if !needsEscape {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // escapeList applies ninjaEscapePath to each string in the values slice.

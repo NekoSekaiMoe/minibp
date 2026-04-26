@@ -496,14 +496,13 @@ func (e *Evaluator) interpolateString(s string) string {
 
 	// Replace all ${var} patterns with variable values
 	return interpolationPattern.ReplaceAllStringFunc(s, func(match string) string {
-		parts := interpolationPattern.FindStringSubmatch(match)
-		if len(parts) != 2 {
+		submatches := interpolationPattern.FindStringSubmatchIndex(match)
+		if len(submatches) < 4 {
 			return match
 		}
-		name := parts[1]
+		name := match[submatches[2]:submatches[3]]
 		val, ok := e.vars[name]
 		if !ok {
-			// Variable not found - leave pattern unchanged
 			return match
 		}
 		return fmt.Sprintf("%v", val)
@@ -966,8 +965,7 @@ func EvalToStringList(expr Expression, eval *Evaluator) []string {
 	case []string:
 		return v
 	case []interface{}:
-		// Filter to only string values
-		var result []string
+		result := make([]string, 0, len(v))
 		for _, item := range v {
 			if s, ok := item.(string); ok {
 				result = append(result, s)
@@ -991,7 +989,7 @@ func EvalToStringList(expr Expression, eval *Evaluator) []string {
 //   - []string: List of string values, or nil if not a List
 func EvalToStringListNoEval(expr Expression) []string {
 	if l, ok := expr.(*List); ok {
-		var result []string
+		result := make([]string, 0, len(l.Values))
 		for _, item := range l.Values {
 			if s, ok := item.(*String); ok {
 				result = append(result, s.Value)

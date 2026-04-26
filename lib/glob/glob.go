@@ -148,6 +148,10 @@ func expandGlob(pattern, baseDir string) ([]string, error) {
 			if err != nil || info.IsDir() {
 				return err
 			}
+			// Skip symlinks to prevent directory traversal
+			if info.Mode()&os.ModeSymlink != 0 {
+				return nil
+			}
 			// Convert absolute path to relative for consistency
 			relPath, err := filepath.Rel(baseDir, path)
 			if err != nil {

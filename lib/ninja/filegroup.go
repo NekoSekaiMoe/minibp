@@ -24,6 +24,8 @@
 //   - Outputs(m, ctx) []string: Returns output directory paths
 //   - NinjaEdge(m, ctx) string: Returns ninja build edges
 //   - Desc(m, src) string: Returns a short description
+//
+// This file provides file group rules for organizing and copying files in the build system.
 package ninja
 
 import (

@@ -17,8 +17,8 @@
 //
 // The Generator uses dependency injection for testability:
 //   - Graph interface for dependency ordering
-//   - map[string]BuildRule for module type implementations
-//   - map[string]*parser.Module for all module definitions
+//   - Map[string]BuildRule for module type implementations
+//   - Map[string]*parser.Module for all module definitions
 //
 // This file contains the core Generator implementation, helper types,
 // and utility functions for ninja generation. Key types include:
@@ -26,6 +26,10 @@
 //   - Graph: Interface providing dependency ordering via TopoSort
 //   - BuildRule: Interface implemented by each module type (cc, go, java, etc.)
 //   - Toolchain: Struct holding compiler paths and flags
+//
+// Generator is the main entry point for ninja file generation.
+// It coordinates the build pipeline and produces valid Ninja syntax.
+// The Generate method must be called to write the build file.
 package ninja
 
 import (
@@ -52,6 +56,14 @@ type Graph interface {
 // Generator creates ninja build files from module dependency graphs.
 // It orchestrates the translation from high-level module definitions
 // to low-level Ninja build rules and edges.
+// The generator handles all aspects of build file generation including:
+//   - Rule definition rendering (compilers, linkers, archivers)
+//   - Build edge generation (what to build, with what inputs)
+//   - Path adjustment for cross-directory builds
+//   - Include path collection for C/C++
+//   - Multi-architecture builds (multilib)
+//   - Java classpath and data file dependencies
+//   - Phony target generation
 type Generator struct {
 	graph      Graph
 	rules      map[string]BuildRule
@@ -510,6 +522,22 @@ func (g *Generator) Generate(w io.Writer) error {
 
 	var allOutputs []string
 	seenCleanOutputs := make(map[string]bool)
+	visited := make(map[string]bool)
+	includeSeen := make(map[string]bool)
+	sourceDir := g.sourceDir
+	if sourceDir == "." {
+		absPath, _ := filepath.Abs(g.sourceDir)
+		sourceDir = filepath.Base(absPath)
+	}
+
+	type phonyInfo struct {
+		phonyName string
+		outputs   []string
+	}
+	var phonyEntries []phonyInfo
+	seenPhony := make(map[string]bool)
+	allPhonyTargets := make([]string, 0)
+	seenAllTargets := make(map[string]bool)
 
 	for _, level := range levels {
 		for _, moduleName := range level {
@@ -523,29 +551,33 @@ func (g *Generator) Generate(w io.Writer) error {
 				continue
 			}
 
-			visited := make(map[string]bool)
+			for k := range visited {
+				delete(visited, k)
+			}
 			includes := g.collectIncludePaths(moduleName, visited)
 
 			if strings.HasPrefix(m.Type, "cc_") || strings.HasPrefix(m.Type, "cpp_") {
-				seen := make(map[string]bool)
-				for _, inc := range includes {
-					seen[inc] = true
+				for k := range includeSeen {
+					delete(includeSeen, k)
 				}
-				if !seen["."] {
+				for _, inc := range includes {
+					includeSeen[inc] = true
+				}
+				if !includeSeen["."] {
 					includes = append(includes, ".")
 				}
 				srcs := getSrcs(m)
 				for _, src := range srcs {
 					dir := filepath.Dir(src)
-					if dir != "." && !seen[dir] {
+					if dir != "." && !includeSeen[dir] {
 						includes = append(includes, dir)
-						seen[dir] = true
+						includeSeen[dir] = true
 					}
 				}
 				for _, dir := range getLocalIncludeDirs(m) {
-					if !seen[dir] {
+					if !includeSeen[dir] {
 						includes = append(includes, dir)
-						seen[dir] = true
+						includeSeen[dir] = true
 					}
 				}
 				relPrefix := g.getRelativePath("")
@@ -554,21 +586,11 @@ func (g *Generator) Generate(w io.Writer) error {
 					if relPrefix != "" && relPrefix != "." {
 						flag = "-isystem " + filepath.Join(relPrefix, dir)
 					}
-					if !seen[flag] {
+					if !includeSeen[flag] {
 						includes = append(includes, flag)
-						seen[flag] = true
+						includeSeen[flag] = true
 					}
 				}
-			}
-
-			sourceDir := g.sourceDir
-
-			if sourceDir == "." {
-
-				absPath, _ := filepath.Abs(g.sourceDir)
-
-				sourceDir = filepath.Base(absPath)
-
 			}
 
 			archs := g.archsForModule(m)
@@ -581,9 +603,7 @@ func (g *Generator) Generate(w io.Writer) error {
 				edgeDef := rule.NinjaEdge(m, archCtx)
 
 				if edgeDef == "" && m.Type != "cc_library_headers" {
-
 					continue
-
 				}
 
 				if edgeDef != "" {
@@ -618,33 +638,7 @@ func (g *Generator) Generate(w io.Writer) error {
 				}
 
 				fmt.Fprint(w, g.adjustPaths(edgeDef))
-			}
-		}
-	}
 
-	for _, level := range levels {
-		for _, moduleName := range level {
-			m, ok := g.modules[moduleName]
-			if !ok || m == nil {
-				continue
-			}
-			rule, ok := g.rules[m.Type]
-			if !ok {
-				continue
-			}
-			archs := g.archsForModule(m)
-			for _, arch := range archs {
-				archCtx := ctx
-				if arch != g.arch {
-					archCtx = g.ruleRenderContextForArch(arch)
-				}
-				edgeDef := rule.NinjaEdge(m, archCtx)
-				if edgeDef == "" && m.Type != "cc_library_headers" {
-					continue
-				}
-				if edgeDef == "" {
-					continue
-				}
 				outputs := rule.Outputs(m, archCtx)
 				if len(outputs) == 0 {
 					continue
@@ -663,72 +657,42 @@ func (g *Generator) Generate(w io.Writer) error {
 				if arch != "" && arch != g.arch && len(archs) > 1 {
 					phonyName = moduleName + "_" + arch
 				}
-				escapedOutputs := make([]string, 0, len(outputs))
-				for _, out := range outputs {
-					escapedOutputs = append(escapedOutputs, g.adjustBuildPath(out, true))
+				if !seenPhony[phonyName] {
+					seenPhony[phonyName] = true
+					escapedOutputs := make([]string, 0, len(outputs))
+					for _, out := range outputs {
+						escapedOutputs = append(escapedOutputs, g.adjustBuildPath(out, true))
+					}
+					phonyEntries = append(phonyEntries, phonyInfo{phonyName: phonyName, outputs: escapedOutputs})
 				}
-				fmt.Fprintf(w, "build %s: phony %s\n", ninjaEscapePath(phonyName), strings.Join(escapedOutputs, " "))
-			}
-		}
-	}
 
-	// Collect all phony targets for 'all' target (excluding clean and modules without outputs)
-	allPhonyTargets := make([]string, 0)
-	for _, level := range levels {
-		for _, moduleName := range level {
-			m, ok := g.modules[moduleName]
-			if !ok || m == nil {
-				continue
-			}
-			// Skip if it would create a circular dependency or is a special module
-			if moduleName == "all" || moduleName == "clean" {
-				continue
-			}
-
-			rule, ok := g.rules[m.Type]
-			if !ok {
-				continue
-			}
-			outputs := rule.Outputs(m, g.ruleRenderContextForArch(g.arch))
-			if len(outputs) == 0 {
-				continue // Skip modules without outputs (e.g. headers, custom)
-			}
-			// Skip header-only libraries
-			if m.Type == "cc_library_headers" {
-				continue
-			}
-			phonyName := moduleName
-			archs := g.archsForModule(m)
-			if len(archs) > 1 {
-				for _, arch := range archs {
-					if arch != g.arch && arch != "" {
-						allPhonyTargets = append(allPhonyTargets, moduleName+"_"+arch)
+				if moduleName != "all" && moduleName != "clean" && m.Type != "cc_library_headers" {
+					if !seenAllTargets[phonyName] {
+						seenAllTargets[phonyName] = true
+						allPhonyTargets = append(allPhonyTargets, phonyName)
 					}
 				}
 			}
-			allPhonyTargets = append(allPhonyTargets, phonyName)
 		}
 	}
 
-	// Remove duplicates
-	seen := make(map[string]bool)
-	uniqueTargets := make([]string, 0)
-	for _, t := range allPhonyTargets {
-		if !seen[t] {
-			seen[t] = true
-			uniqueTargets = append(uniqueTargets, t)
-		}
+	for _, pe := range phonyEntries {
+		fmt.Fprintf(w, "build %s: phony %s\n", ninjaEscapePath(pe.phonyName), strings.Join(pe.outputs, " "))
 	}
 
 	// Add 'all' target that depends on all other targets (excluding clean)
-	fmt.Fprintf(w, "build all: phony %s\n\n", strings.Join(uniqueTargets, " "))
+	fmt.Fprintf(w, "build all: phony %s\n\n", strings.Join(allPhonyTargets, " "))
 	fmt.Fprintf(w, "default all\n\n")
 
 	// Add 'clean' target - removes build artifacts but preserves build.ninja
-	fmt.Fprintf(w, "rule CLEAN\n command = ninja -t clean && %s\n\n", ninjaEscape(g.regenCmd))
+	if g.regenCmd != "" {
+		fmt.Fprintf(w, "rule CLEAN\n command = ninja -t clean && %s\n\n", ninjaEscape(g.regenCmd))
+	} else {
+		fmt.Fprintf(w, "rule CLEAN\n command = ninja -t clean\n\n")
+	}
 	fmt.Fprintf(w, "build clean: CLEAN\n")
 
-	return nil
+	return nw.Flush()
 }
 
 // archFlags returns compiler and linker flags for a given target architecture.
@@ -1047,18 +1011,19 @@ func (g *Generator) addIncludesToEdge(edge string, includes []string) string {
 		return edge
 	}
 
-	includeFlags := ""
+	var includeFlagParts []string
 	relPrefix := g.getRelativePath("")
 	for _, inc := range includes {
 		if strings.HasPrefix(inc, "-isystem") {
-			includeFlags += " " + inc
+			includeFlagParts = append(includeFlagParts, inc)
 			continue
 		}
 		if relPrefix != "" && relPrefix != "." {
 			inc = filepath.Join(relPrefix, inc)
 		}
-		includeFlags += " -I" + inc
+		includeFlagParts = append(includeFlagParts, "-I"+inc)
 	}
+	includeFlags := " " + strings.Join(includeFlagParts, " ")
 
 	lines := strings.Split(edge, "\n")
 	compileFlags := false

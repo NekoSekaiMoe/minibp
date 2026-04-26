@@ -27,6 +27,9 @@
 //   - Outputs(m, ctx) []string: Returns output file paths
 //   - NinjaEdge(m, ctx) string: Returns ninja build edges
 //   - Desc(m, src) string: Returns a short description
+//
+// This file provides rules for using pre-built binaries and libraries
+// in the Ninja build system.
 package ninja
 
 import (
@@ -35,6 +38,15 @@ import (
 	"path/filepath"
 	"strings"
 )
+
+func sanitizePathComponent(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '/' || r == '\\' {
+			return '_'
+		}
+		return r
+	}, s)
+}
 
 // prebuiltEtcRule implements a prebuilt file that gets installed to system directories.
 // The subdir specifies the installation directory (etc, usr/share, firmware, or root).
@@ -79,6 +91,7 @@ func (r *prebuiltEtcRule) Outputs(m *parser.Module, ctx RuleRenderContext) []str
 	if filename == "" {
 		filename = filepath.Base(src)
 	}
+	filename = sanitizePathComponent(filename)
 	out := filename
 	if r.subdir != "" {
 		out = filepath.Join(r.subdir, filename)
@@ -140,6 +153,7 @@ func (r *prebuiltBinaryRule) Outputs(m *parser.Module, ctx RuleRenderContext) []
 	if stem == "" {
 		stem = name
 	}
+	stem = sanitizePathComponent(stem)
 	return []string{stem + ctx.ArchSuffix}
 }
 
@@ -207,6 +221,7 @@ func (r *prebuiltLibraryRule) Outputs(m *parser.Module, ctx RuleRenderContext) [
 	if stem == "" {
 		stem = "lib" + name
 	}
+	stem = sanitizePathComponent(stem)
 	if !strings.HasSuffix(stem, r.ext) {
 		stem += ctx.ArchSuffix + r.ext
 	}

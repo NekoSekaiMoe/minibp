@@ -27,6 +27,8 @@
 //   - Outputs(m, ctx) []string: Returns output file paths
 //   - NinjaEdge(m, ctx) string: Returns ninja build edges
 //   - Desc(m, src) string: Returns a short description
+//
+// This file provides Java compilation and packaging rules for the Ninja build system.
 package ninja
 
 import (
@@ -35,6 +37,28 @@ import (
 	"runtime"
 	"strings"
 )
+
+func sanitizeManifestValue(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' {
+			return ' '
+		}
+		return r
+	}, s)
+}
+
+func sanitizeOutdir(name string) string {
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") ||
+		strings.Contains(name, "..") {
+		return strings.Map(func(r rune) rune {
+			if r == '/' || r == '\\' {
+				return '_'
+			}
+			return r
+		}, name)
+	}
+	return name
+}
 
 // javaLibrary implements a Java library build rule.
 // Java libraries are built by compiling Java source files and packaging them into .jar archives.
@@ -109,7 +133,7 @@ func (r *javaLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string 
 
 	javaflags := getJavaflags(m)
 	out := r.Outputs(m, ctx)[0]
-	outdir := name + "_classes"
+	outdir := sanitizeOutdir(name) + "_classes"
 
 	var edges strings.Builder
 	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_lib %s\n outdir = %s\n flags = %s\n", name, strings.Join(srcs, " "), outdir, javaflags))
@@ -190,11 +214,12 @@ func (r *javaBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	javaflags := getJavaflags(m)
 	out := r.Outputs(m, ctx)[0]
-	outdir := name + "_classes"
+	outdir := sanitizeOutdir(name) + "_classes"
+	safeMainClass := sanitizeManifestValue(mainClass)
 
 	var edges strings.Builder
 	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_bin %s\n outdir = %s\n flags = %s\n", name, strings.Join(srcs, " "), outdir, javaflags))
-	edges.WriteString(fmt.Sprintf("build %s: jar_create_executable %s.stamp\n outdir = %s\n main_class = %s\n class_path = .\n", out, name, outdir, mainClass))
+	edges.WriteString(fmt.Sprintf("build %s: jar_create_executable %s.stamp\n outdir = %s\n main_class = %s\n class_path = .\n", out, name, outdir, safeMainClass))
 	return edges.String()
 }
 

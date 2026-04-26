@@ -1,1 +1,9 @@
 soong/
+examples/javapp_classes/
+examples/build.ninja
+examples/.ninja_log
+examples/.ninja_deps
+build.ninja
+.ninja_deps
+.ninja_log
+examples/libjava_classes/
