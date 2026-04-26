@@ -2,11 +2,23 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <time.h>
+#include <string.h>
+#include <stdlib.h>
 
 static int current_level = LOG_LEVEL_INFO;
+static FILE* log_file = NULL;
+static int use_colors = 1;
 
 void log_set_level(int level) {
     current_level = level;
+}
+
+void log_set_file(FILE* file) {
+    log_file = file;
+}
+
+void log_enable_colors(int enable) {
+    use_colors = enable;
 }
 
 static void log_message(int level, const char* level_str, const char* format, va_list args) {
@@ -18,9 +30,31 @@ static void log_message(int level, const char* level_str, const char* format, va
     char timestamp[20];
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", tm_info);
 
-    printf("[%s] [%s] ", timestamp, level_str);
-    vprintf(format, args);
-    printf("\n");
+    FILE* output = log_file ? log_file : stdout;
+    
+    if (use_colors && output == stdout) {
+        const char* color = "";
+        switch (level) {
+            case LOG_LEVEL_DEBUG: color = "\033[36m"; break;
+            case LOG_LEVEL_INFO:  color = "\033[32m"; break;
+            case LOG_LEVEL_WARN:  color = "\033[33m"; break;
+            case LOG_LEVEL_ERROR: color = "\033[31m"; break;
+            default: color = "\033[0m";
+        }
+        fprintf(output, "%s[%s]\033[0m [%s%s\033[0m ", timestamp, color, level_str, color);
+    } else {
+        fprintf(output, "[%s] [%s] ", timestamp, level_str);
+    }
+    
+    va_list args_copy;
+    va_copy(args_copy, args);
+    vfprintf(output, format, args_copy);
+    va_end(args_copy);
+    fprintf(output, "\n");
+    
+    if (log_file) {
+        fflush(log_file);
+    }
 }
 
 void log_info(const char* format, ...) {
@@ -49,4 +83,22 @@ void log_debug(const char* format, ...) {
     va_start(args, format);
     log_message(LOG_LEVEL_DEBUG, "DEBUG", format, args);
     va_end(args);
+}
+
+void log_fatal(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    log_message(LOG_LEVEL_ERROR, "FATAL", format, args);
+    va_end(args);
+}
+
+int log_get_level() {
+    return current_level;
+}
+
+void log_close() {
+    if (log_file) {
+        fclose(log_file);
+        log_file = NULL;
+    }
 }

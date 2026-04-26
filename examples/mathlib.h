@@ -1,21 +1,28 @@
 #ifndef MATHLIB_H
 #define MATHLIB_H
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// 计算两个整数的最大公约数
 int gcd(int a, int b);
-
-// 计算两个整数的最小公倍数
 int lcm(int a, int b);
-
-// 判断一个数是否为质数
 int is_prime(int n);
-
-// 计算阶乘
 long long factorial(int n);
+int power(int base, int exp);
+double power_double(double base, int exp);
+double sqrt_approx(double n);
+int fibonacci(int n);
+int fibonacci_rec(int n);
+int mod_pow(int base, int exp, int mod);
+int count_digits(int n);
+int reverse_int(int n);
+int is_palindrome_num(int n);
+int sum_of_digits(int n);
+int next_prime(int n);
+int nth_prime(int n);
 
 #ifdef __cplusplus
 }

@@ -247,7 +247,7 @@ func (r *ccLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	if shared && len(sharedLibs) > 0 {
 		for _, dep := range sharedLibs {
 			depName := strings.TrimPrefix(dep, ":")
-			sharedInputs = append(sharedInputs, sharedLibOutputName(depName, ctx.ArchSuffix))
+			sharedInputs = append(sharedInputs, ctx.PathPrefix+sharedLibOutputName(depName, ctx.ArchSuffix))
 			ldflags = joinFlags(ldflags, "-l"+depName)
 		}
 	}
@@ -369,7 +369,7 @@ func (r *ccLibraryStatic) NinjaEdge(m *parser.Module, ctx RuleRenderContext) str
 	}
 
 	out := r.Outputs(m, ctx)[0]
-	edges.WriteString(fmt.Sprintf("build %s: cc_archive %s\n", out, strings.Join(objFiles, " ")))
+	edges.WriteString(fmt.Sprintf("build %s: cc_archive %s\n", ctx.PathPrefix+out, strings.Join(objFiles, " ")))
 
 	if moduleLto == "thin" {
 		for _, src := range srcs {
@@ -476,7 +476,7 @@ func (r *ccLibraryShared) NinjaEdge(m *parser.Module, ctx RuleRenderContext) str
 	sharedLibs := GetListProp(m, "shared_libs")
 	for _, dep := range sharedLibs {
 		depName := strings.TrimPrefix(dep, ":")
-		sharedInputs = append(sharedInputs, sharedLibOutputName(depName, ctx.ArchSuffix))
+		sharedInputs = append(sharedInputs, ctx.PathPrefix+sharedLibOutputName(depName, ctx.ArchSuffix))
 		ldflags = joinFlags(ldflags, "-l"+depName)
 	}
 
@@ -694,11 +694,11 @@ func (r *ccBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	var libFiles []string
 	for _, dep := range deps {
 		depName := strings.TrimPrefix(dep, ":")
-		libFiles = append(libFiles, staticLibOutputName(depName, ctx.ArchSuffix))
+		libFiles = append(libFiles, ctx.PathPrefix+staticLibOutputName(depName, ctx.ArchSuffix))
 	}
 	for _, dep := range sharedLibs {
 		depName := strings.TrimPrefix(dep, ":")
-		libFiles = append(libFiles, sharedLibOutputName(depName, ctx.ArchSuffix))
+		libFiles = append(libFiles, ctx.PathPrefix+sharedLibOutputName(depName, ctx.ArchSuffix))
 		linkFlags = joinFlags(linkFlags, "-l"+depName)
 	}
 
@@ -816,11 +816,11 @@ func ccTestEdge(m *parser.Module, ctx RuleRenderContext) string {
 	var libFiles []string
 	for _, dep := range deps {
 		depName := strings.TrimPrefix(dep, ":")
-		libFiles = append(libFiles, staticLibOutputName(depName, ctx.ArchSuffix))
+		libFiles = append(libFiles, ctx.PathPrefix+staticLibOutputName(depName, ctx.ArchSuffix))
 	}
 	for _, dep := range sharedLibs {
 		depName := strings.TrimPrefix(dep, ":")
-		libFiles = append(libFiles, sharedLibOutputName(depName, ctx.ArchSuffix))
+		libFiles = append(libFiles, ctx.PathPrefix+sharedLibOutputName(depName, ctx.ArchSuffix))
 		linkFlags = joinFlags(linkFlags, "-l"+depName)
 	}
 	var edges strings.Builder

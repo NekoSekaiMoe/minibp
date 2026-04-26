@@ -796,6 +796,7 @@ func (g *Generator) ruleRenderContextForArch(arch string) RuleRenderContext {
 	} else {
 		ctx.GOARCH = g.arch
 	}
+	ctx.PathPrefix = g.pathPrefix
 	return ctx
 }
 
@@ -1096,7 +1097,7 @@ func (g *Generator) javaDepOutputs(moduleName string, ctx RuleRenderContext) []s
 		for _, out := range rule.Outputs(depMod, ctx) {
 			if strings.HasSuffix(out, ".jar") && !seen[out] {
 				seen[out] = true
-				outputs = append(outputs, out)
+				outputs = append(outputs, g.adjustBuildPath(out, true))
 			}
 		}
 	}
@@ -1372,13 +1373,13 @@ func (g *Generator) distEdgesForModule(m *parser.Module, ctx RuleRenderContext) 
 // Returns:
 //   - true if the path should be prefixed
 func (g *Generator) shouldPrefixInputPath(path string) bool {
+	if g.pathPrefix == "" {
+		return false
+	}
 	return !strings.HasPrefix(path, "$") &&
 		!strings.HasPrefix(path, g.pathPrefix) &&
 		!strings.HasPrefix(path, "/") &&
-		!strings.HasPrefix(path, "..") &&
-		!strings.HasSuffix(path, ".o") &&
-		!strings.HasSuffix(path, ".jar") &&
-		!strings.HasSuffix(path, ".stamp")
+		!strings.HasPrefix(path, "..")
 }
 
 // shouldPrefixOutputPath determines if an output path should have the path prefix prepended.
@@ -1395,11 +1396,12 @@ func (g *Generator) shouldPrefixInputPath(path string) bool {
 // Returns:
 //   - true if the path should be prefixed
 func (g *Generator) shouldPrefixOutputPath(path string) bool {
+	if g.pathPrefix == "" {
+		return false
+	}
 	return path != "" &&
 		!strings.HasPrefix(path, g.pathPrefix) &&
-		!strings.HasPrefix(path, "/") &&
-		!strings.HasPrefix(path, "..") &&
-		strings.Contains(path, "/")
+		!strings.HasPrefix(path, "/")
 }
 
 // adjustBuildPath adjusts a single build path (input or output) by prepending the path prefix.

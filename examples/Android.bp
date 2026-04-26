@@ -51,6 +51,7 @@ cc_library {
     name: "libmath",
     srcs: ["mathlib.c"],
     cflags: ["-Wall", "-O2"],
+    libs: ["m"],
 }
 
 // Array utility library (C++)
@@ -94,6 +95,7 @@ cc_binary {
     name: "test_mathlib",
     srcs: ["test_mathlib.c"],
     deps: [":libmath"],
+    libs: ["m"],
 }
 
 // Array utility test (C++)

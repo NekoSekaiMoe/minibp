@@ -93,7 +93,8 @@ type RuleRenderContext struct {
 	Ccache     string
 	Lto        string
 	GOOS       string
-	GOARCH     string
+	GOARCH    string
+	PathPrefix string
 }
 
 // DefaultRuleRenderContext returns a RuleRenderContext with default toolchain values.

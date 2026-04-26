@@ -274,7 +274,7 @@ func (r *goBinary) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext, 
 	var libFiles []string
 	for _, dep := range deps {
 		depName := strings.TrimPrefix(dep, ":")
-		libFiles = append(libFiles, depName+suffix+".a")
+		libFiles = append(libFiles, ctx.PathPrefix+depName+suffix+".a")
 	}
 
 	srcStr := strings.Join(srcs, " ")
