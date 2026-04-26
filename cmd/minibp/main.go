@@ -178,18 +178,31 @@ func parseDefinitionsFromFiles(files []string) ([]parser.Definition, error) {
 			return nil, fmt.Errorf("error opening %s: %w", file, err)
 		}
 
+		// Read source content for error display.
+		source, readErr := io.ReadAll(f)
+		f.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("error reading %s: %w", file, readErr)
+		}
+
+		// Re-open file for parsing.
+		f, err = openInputFile(file)
+		if err != nil {
+			return nil, fmt.Errorf("error opening %s: %w", file, err)
+		}
+
 		// Parse the Blueprint file into an AST.
 		// The parser handles:
 		//   - Lexical analysis (tokens, strings, numbers)
 		//   - Syntax parsing (module declarations, property values)
 		//   - Expression evaluation (variables, operators, select())
 		// Returns error for syntax errors or evaluation failures.
-		parsedFile, parseErr := parseBlueprintFile(f, file)
+		parsedFile, parseErr := parseBlueprintFile(f, file, string(source))
 		closeErr := f.Close()
 		if parseErr != nil {
 			// Collect parse error rather than failing immediately.
 			// This allows checking all files in one pass.
-			parseErrors = append(parseErrors, fmt.Sprintf("parse error in %s: %v", file, parseErr))
+			parseErrors = append(parseErrors, parseErr.Error())
 			continue
 		}
 		if closeErr != nil {

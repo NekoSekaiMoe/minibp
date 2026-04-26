@@ -31,7 +31,10 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"text/scanner"
+
+	"minibp/lib/errors"
 )
 
 // Parser parses Blueprint files.
@@ -62,8 +65,9 @@ type Parser struct {
 	lexer     *Lexer  // The lexer used to tokenize the input
 	curToken  Token   // The current token being processed
 	peekToken Token   // The next token (lookahead) for grammar look-ahead
-	fileName  string  // Name of the file being parsed (for error reporting)
-	errors    []error // List of parsing errors encountered
+	fileName string  // Name of the file being parsed (for error reporting)
+	source   string // Source content for error line display
+	errors   []error // List of parsing errors encountered
 }
 
 // NewParser creates a new Parser from an io.Reader.
@@ -86,11 +90,16 @@ type Parser struct {
 //
 // Returns:
 //   - A new Parser instance ready to parse the input
-func NewParser(r io.Reader, fileName string) *Parser {
+func NewParser(r io.Reader, fileName string, source ...string) *Parser {
+	src := ""
+	if len(source) > 0 {
+		src = source[0]
+	}
 	p := &Parser{
 		lexer:    NewLexer(r, fileName),
 		fileName: fileName,
-		errors:   []error{},
+		source:  src,
+		errors:  []error{},
 	}
 	// Initialize curToken and peekToken by advancing twice
 	// This sets up the initial state for the recursive descent parser
@@ -140,7 +149,9 @@ func (p *Parser) expect(t TokenType) (Token, error) {
 		p.nextToken()
 		return tok, nil
 	}
-	return Token{}, fmt.Errorf("%s: expected %s, got %s", p.curToken.Pos, t, p.curToken.Type)
+	err := errors.Syntax(fmt.Sprintf("expected %s, got %s", t, p.curToken.Type)).
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column)
+	return Token{}, err
 }
 
 // expectPeek checks if the peek token (lookahead) matches the expected type.
@@ -248,7 +259,11 @@ func (p *Parser) skipToNextDefinition() {
 //   - error: nil if successful, otherwise a parse error
 func (p *Parser) parseDefinition() (Definition, error) {
 	if p.curToken.Type != IDENT {
-		return nil, fmt.Errorf("%s: expected identifier, got %s", p.curToken.Pos, p.curToken.Type)
+		return nil, errors.Syntax(fmt.Sprintf("expected identifier, got %s", p.curToken.Type)).
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithContent(p.lineContent(p.curToken.Pos.Line)).
+			WithContentCaret(len(p.curToken.Literal)).
+			WithSuggestion("Module or variable name must be an unquoted identifier")
 	}
 
 	// Record the name and its position for error reporting
@@ -268,7 +283,8 @@ func (p *Parser) parseDefinition() (Definition, error) {
 		// Examples: my_var = "value", my_list += ["item"]
 		return p.parseAssignment(name, namePos)
 	default:
-		return nil, fmt.Errorf("%s: unexpected token %s after identifier '%s'", p.curToken.Pos, p.curToken.Type, name)
+		return nil, errors.Syntax(fmt.Sprintf("unexpected token %s after identifier '%s'", p.curToken.Type, name)).
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column)
 	}
 }
 
@@ -313,42 +329,54 @@ func (p *Parser) parseModule(typeName string, typePos scanner.Position) (*Module
 			// Architecture-specific overrides: arch: { arm: {...}, arm64: {...} }
 			archMap, ok := prop.Value.(*Map)
 			if !ok {
-				return nil, fmt.Errorf("%s: expected map value for 'arch' override", prop.ColonPos)
+				return nil, errors.Syntax("expected map value for 'arch' override").
+					WithLocation(p.fileName, prop.ColonPos.Line, prop.ColonPos.Column).
+					WithSuggestion("arch: requires map value like arch: { arm: {...} }")
 			}
 			for _, ap := range archMap.Properties {
 				archInner, ok := ap.Value.(*Map)
 				if !ok {
-					return nil, fmt.Errorf("%s: expected map value for arch override '%s'", ap.ColonPos, ap.Name)
+					return nil, errors.Syntax(fmt.Sprintf("expected map value for arch override '%s'", ap.Name)).
+						WithLocation(p.fileName, ap.ColonPos.Line, ap.ColonPos.Column).
+						WithSuggestion("Architecture variant requires map value")
 				}
 				archProps[ap.Name] = archInner
 			}
 		case "host":
 			// Host-specific overrides: host: { ... }
 			m, ok := prop.Value.(*Map)
+		if !ok {
+			return nil, errors.Syntax("expected map value for 'host' override").
+				WithLocation(p.fileName, prop.ColonPos.Line, prop.ColonPos.Column).
+				WithSuggestion("host: requires map value like host: { ... }")
+		}
+		hostProps = m
+	case "target":
+		// Target-specific overrides: target: { ... }
+		m, ok := prop.Value.(*Map)
+		if !ok {
+			return nil, errors.Syntax("expected map value for 'target' override").
+				WithLocation(p.fileName, prop.ColonPos.Line, prop.ColonPos.Column).
+				WithSuggestion("target: requires map value like target: { ... }")
+		}
+		targetProps = m
+	case "multilib":
+		// Multilib overrides: multilib: { lib32: {...}, lib64: {...} }
+		mlMap, ok := prop.Value.(*Map)
+		if !ok {
+			return nil, errors.Syntax("expected map value for 'multilib' override").
+				WithLocation(p.fileName, prop.ColonPos.Line, prop.ColonPos.Column).
+				WithSuggestion("multilib: requires map value like multilib: { lib32: {...} }")
+		}
+		for _, mp := range mlMap.Properties {
+			mlInner, ok := mp.Value.(*Map)
 			if !ok {
-				return nil, fmt.Errorf("%s: expected map value for 'host' override", prop.ColonPos)
+				return nil, errors.Syntax(fmt.Sprintf("expected map value for multilib override '%s'", mp.Name)).
+					WithLocation(p.fileName, mp.ColonPos.Line, mp.ColonPos.Column).
+					WithSuggestion("Multilib variant requires map value")
 			}
-			hostProps = m
-		case "target":
-			// Target-specific overrides: target: { ... }
-			m, ok := prop.Value.(*Map)
-			if !ok {
-				return nil, fmt.Errorf("%s: expected map value for 'target' override", prop.ColonPos)
-			}
-			targetProps = m
-		case "multilib":
-			// Multilib overrides: multilib: { lib32: {...}, lib64: {...} }
-			mlMap, ok := prop.Value.(*Map)
-			if !ok {
-				return nil, fmt.Errorf("%s: expected map value for 'multilib' override", prop.ColonPos)
-			}
-			for _, mp := range mlMap.Properties {
-				mlInner, ok := mp.Value.(*Map)
-				if !ok {
-					return nil, fmt.Errorf("%s: expected map value for multilib override '%s'", mp.ColonPos, mp.Name)
-				}
-				multilibProps[mp.Name] = mlInner
-			}
+			multilibProps[mp.Name] = mlInner
+		}
 		case "override":
 			// Override flag: override: true
 			if b, ok := prop.Value.(*Bool); ok {
@@ -386,6 +414,7 @@ func (p *Parser) parseModule(typeName string, typePos scanner.Position) (*Module
 func (p *Parser) parsePropertyList() ([]*Property, scanner.Position, error) {
 	properties := []*Property{}
 	var rbracePos scanner.Position
+	var lastProp *Property
 
 	// Parse properties until we hit the closing brace or EOF
 	for p.curToken.Type != EOF && p.curToken.Type != RBRACE {
@@ -395,6 +424,7 @@ func (p *Parser) parsePropertyList() ([]*Property, scanner.Position, error) {
 		}
 		if prop != nil {
 			properties = append(properties, prop)
+			lastProp = prop
 		}
 
 		// Check if we've reached the closing brace
@@ -408,13 +438,31 @@ func (p *Parser) parsePropertyList() ([]*Property, scanner.Position, error) {
 			continue
 		}
 
-		// Error if neither comma nor closing brace
-		return nil, rbracePos, fmt.Errorf("%s: expected ',' or '}' after property", p.curToken.Pos)
+		// Error if neither comma nor closing brace - point to last property
+		var errPos scanner.Position
+		errContent := p.lineContent(p.curToken.Pos.Line)
+		caretLen := 0
+		if lastProp != nil {
+			errPos = lastProp.NamePos
+			errContent = p.lineContent(lastProp.NamePos.Line)
+			caretLen = len(lastProp.Name)
+		} else {
+			errPos = p.curToken.Pos
+		}
+		return nil, rbracePos, errors.Syntax("expected ',' or '}' after property").
+			WithLocation(p.fileName, errPos.Line, errPos.Column).
+			WithContent(errContent).
+			WithContentCaret(caretLen).
+			WithSuggestion("Properties must be separated by commas")
 	}
 
 	// Verify we found the closing brace
 	if p.curToken.Type != RBRACE {
-		return nil, rbracePos, fmt.Errorf("%s: expected }", p.curToken.Pos)
+		return nil, rbracePos, errors.Syntax("expected }").
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithContent(p.lineContent(p.curToken.Pos.Line)).
+			WithContentCaret(1).
+			WithSuggestion("Module block should end with '}'")
 	}
 	rbracePos = p.curToken.Pos
 	p.nextToken()
@@ -431,7 +479,11 @@ func (p *Parser) parsePropertyList() ([]*Property, scanner.Position, error) {
 //   - error: nil if successful, otherwise a parse error
 func (p *Parser) parseProperty() (*Property, error) {
 	if p.curToken.Type != IDENT {
-		return nil, fmt.Errorf("%s: expected property name (identifier), got %s", p.curToken.Pos, p.curToken.Type)
+		return nil, errors.Syntax(fmt.Sprintf("expected property name (identifier), got %s", p.curToken.Type)).
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithContent(p.lineContent(p.curToken.Pos.Line)).
+			WithContentCaret(len(p.curToken.Literal)).
+			WithSuggestion("Property names must be identifiers (unquoted names like name, srcs)")
 	}
 
 	name := p.curToken.Literal
@@ -441,7 +493,11 @@ func (p *Parser) parseProperty() (*Property, error) {
 
 	// Verify colon separator
 	if p.curToken.Type != COLON {
-		return nil, fmt.Errorf("%s: expected ':' after property name '%s'", p.curToken.Pos, name)
+		return nil, errors.Syntax(fmt.Sprintf("expected ':' after property name '%s'", name)).
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithContent(p.lineContent(p.curToken.Pos.Line)).
+			WithContentCaret(1).
+			WithSuggestion("Property name must be followed by ':'")
 	}
 	colonPos := p.curToken.Pos
 	p.nextToken()
@@ -480,7 +536,11 @@ func (p *Parser) parseAssignment(name string, namePos scanner.Position) (*Assign
 	if p.curToken.Type == PLUSEQ {
 		assigner = "+="
 	} else if p.curToken.Type != ASSIGN {
-		return nil, fmt.Errorf("%s: expected '=' or '+=', got %s", p.curToken.Pos, p.curToken.Type)
+		return nil, errors.Syntax(fmt.Sprintf("expected '=' or '+=', got %s", p.curToken.Type)).
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithContent(p.lineContent(p.curToken.Pos.Line)).
+			WithContentCaret(len(p.curToken.Literal)).
+			WithSuggestion("Assignment operator should be '=' or '+='")
 	}
 	p.nextToken()
 
@@ -574,7 +634,11 @@ func (p *Parser) parsePrimary() (Expression, error) {
 		p.nextToken()
 		return &Unset{KeywordPos: pos}, nil
 	default:
-		return nil, fmt.Errorf("%s: unexpected token %s in expression", p.curToken.Pos, p.curToken.Type)
+		return nil, errors.Syntax(fmt.Sprintf("unexpected token %s in expression", p.curToken.Type)).
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithContent(p.lineContent(p.curToken.Pos.Line)).
+			WithContentCaret(len(p.curToken.Literal)).
+			WithSuggestion("Expression value expected (string, list, or map)")
 	}
 }
 
@@ -594,7 +658,11 @@ func (p *Parser) parseString() (*String, error) {
 	// Remove quotes from literal and process escape sequences
 	value, err := strconv.Unquote(literal)
 	if err != nil {
-		return nil, fmt.Errorf("%s: invalid string literal: %v", pos, err)
+		return nil, errors.Syntax(fmt.Sprintf("invalid string literal: %v", err)).
+			WithLocation(p.fileName, pos.Line, pos.Column).
+			WithContent(p.lineContent(pos.Line)).
+			WithContentCaret(len(literal)).
+			WithSuggestion("String literal must be properly quoted")
 	}
 
 	return &String{
@@ -617,7 +685,11 @@ func (p *Parser) parseInt() (*Int64, error) {
 
 	value, err := strconv.ParseInt(literal, 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("%s: invalid integer literal: %v", pos, err)
+		return nil, errors.Syntax(fmt.Sprintf("invalid integer literal: %v", err)).
+			WithLocation(p.fileName, pos.Line, pos.Column).
+			WithContent(p.lineContent(pos.Line)).
+			WithContentCaret(len(literal)).
+			WithSuggestion("Integer must be a valid number")
 	}
 
 	return &Int64{
@@ -693,12 +765,20 @@ func (p *Parser) parseList() (*List, error) {
 			continue
 		}
 
-		return nil, fmt.Errorf("%s: expected ',' or ']' after list element", p.curToken.Pos)
+		return nil, errors.Syntax("expected ',' or ']' after list element").
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithContent(p.lineContent(p.curToken.Pos.Line)).
+			WithContentCaret(len(p.curToken.Literal)).
+			WithSuggestion("List elements must be separated by commas")
 	}
 
 	// Verify closing bracket
 	if p.curToken.Type != RBRACKET {
-		return nil, fmt.Errorf("%s: expected ]", p.curToken.Pos)
+		return nil, errors.Syntax("expected ]").
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithContent(p.lineContent(p.curToken.Pos.Line)).
+			WithContentCaret(1).
+			WithSuggestion("List should end with ']'")
 	}
 	rbracePos = p.curToken.Pos
 	p.nextToken()
@@ -754,7 +834,9 @@ func (p *Parser) parseSelect() (*Select, error) {
 
 	// Expect opening parenthesis after select keyword
 	if p.curToken.Type != LPAREN {
-		return nil, fmt.Errorf("%s: expected '(' after 'select'", p.curToken.Pos)
+		return nil, errors.Syntax("expected '(' after 'select'").
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithSuggestion("select() requires parentheses")
 	}
 	p.nextToken()
 
@@ -774,11 +856,13 @@ func (p *Parser) parseSelect() (*Select, error) {
 				p.nextToken()
 			}
 		}
-		if p.curToken.Type != RPAREN {
-			return nil, fmt.Errorf("%s: expected ')' after tuple conditions", p.curToken.Pos)
-		}
-		p.nextToken()
-	} else {
+if p.curToken.Type != RPAREN {
+		return nil, errors.Syntax("expected ')' after tuple conditions").
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithSuggestion("Tuple conditions must be closed with ')'")
+	}
+	p.nextToken()
+} else {
 		// Single condition
 		cond, err := p.parseConfigurableCondition()
 		if err != nil {
@@ -794,7 +878,9 @@ func (p *Parser) parseSelect() (*Select, error) {
 
 	// Parse cases: { case_pattern: value, ... }
 	if p.curToken.Type != LBRACE {
-		return nil, fmt.Errorf("%s: expected '{' for select cases", p.curToken.Pos)
+		return nil, errors.Syntax("expected '{' for select cases").
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithSuggestion("select() needs cases like { arch: value }")
 	}
 	lbracePos := p.curToken.Pos
 	p.nextToken()
@@ -815,13 +901,17 @@ func (p *Parser) parseSelect() (*Select, error) {
 
 	// Verify closing braces and parenthesis
 	if p.curToken.Type != RBRACE {
-		return nil, fmt.Errorf("%s: expected '}' after select cases", p.curToken.Pos)
+		return nil, errors.Syntax("expected '}' after select cases").
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithSuggestion("select() cases block should end with '}'")
 	}
 	rbracePos := p.curToken.Pos
 	p.nextToken()
 
 	if p.curToken.Type != RPAREN {
-		return nil, fmt.Errorf("%s: expected ')' after select cases", p.curToken.Pos)
+		return nil, errors.Syntax("expected ')' after select cases").
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithSuggestion("select() should end with ')'")
 	}
 	p.nextToken()
 
@@ -853,7 +943,9 @@ func (p *Parser) parseSelect() (*Select, error) {
 //   - error: nil if successful, otherwise a parse error
 func (p *Parser) parseConfigurableCondition() (ConfigurableCondition, error) {
 	if p.curToken.Type != IDENT {
-		return ConfigurableCondition{}, fmt.Errorf("%s: expected identifier for condition", p.curToken.Pos)
+		return ConfigurableCondition{}, errors.Syntax("expected identifier for condition").
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithSuggestion("Use condition function like arch(), os()")
 	}
 
 	funcName := p.curToken.Literal
@@ -914,7 +1006,9 @@ func (p *Parser) parseSelectCase(isTuple bool) (SelectCase, error) {
 //   - error: nil if successful, otherwise a parse error
 func (p *Parser) parseTupleSelectCase() (SelectCase, error) {
 	if p.curToken.Type != LPAREN {
-		return SelectCase{}, fmt.Errorf("%s: expected '(' for tuple pattern in select case", p.curToken.Pos)
+		return SelectCase{}, errors.Syntax("expected '(' for tuple pattern in select case").
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithSuggestion("Tuple pattern needs parentheses like (arm, linux)")
 	}
 	p.nextToken()
 
@@ -932,13 +1026,17 @@ func (p *Parser) parseTupleSelectCase() (SelectCase, error) {
 	}
 
 	if p.curToken.Type != RPAREN {
-		return SelectCase{}, fmt.Errorf("%s: expected ')' after tuple pattern", p.curToken.Pos)
+		return SelectCase{}, errors.Syntax("expected ')' after tuple pattern").
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithSuggestion("Tuple pattern must be closed with ')'")
 	}
 	p.nextToken()
 
 	// Expect colon before value
 	if p.curToken.Type != COLON {
-		return SelectCase{}, fmt.Errorf("%s: expected ':' after select pattern", p.curToken.Pos)
+		return SelectCase{}, errors.Syntax("expected ':' after select pattern").
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithSuggestion("Pattern must be followed by ':' and value")
 	}
 	colonPos := p.curToken.Pos
 	p.nextToken()
@@ -983,7 +1081,9 @@ func (p *Parser) parseSimpleSelectCase() (SelectCase, error) {
 
 	// Expect colon before value
 	if p.curToken.Type != COLON {
-		return SelectCase{}, fmt.Errorf("%s: expected ':' after select pattern", p.curToken.Pos)
+		return SelectCase{}, errors.Syntax("expected ':' after select pattern").
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithSuggestion("Pattern must be followed by ':' and value")
 	}
 	colonPos := p.curToken.Pos
 	p.nextToken()
@@ -1024,7 +1124,9 @@ func (p *Parser) parseSelectPattern() (SelectPattern, error) {
 		// @ prefix for binding: @variable
 		p.nextToken()
 		if p.curToken.Type != IDENT {
-			return SelectPattern{}, fmt.Errorf("%s: expected variable name after '@'", p.curToken.Pos)
+			return SelectPattern{}, errors.Syntax("expected variable name after '@'").
+				WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+				WithSuggestion("Use @variable to bind matched value")
 		}
 		binding := p.curToken.Literal
 		p.nextToken()
@@ -1035,7 +1137,9 @@ func (p *Parser) parseSelectPattern() (SelectPattern, error) {
 			p.nextToken() // consume "any"
 			p.nextToken() // consume "@"
 			if p.curToken.Type != IDENT {
-				return SelectPattern{}, fmt.Errorf("%s: expected variable name after '@'", p.curToken.Pos)
+				return SelectPattern{}, errors.Syntax("expected variable name after '@'").
+					WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+					WithSuggestion("Use @variable to bind matched value")
 			}
 			binding := p.curToken.Literal
 			p.nextToken()
@@ -1063,13 +1167,26 @@ func (p *Parser) parseSelectPattern() (SelectPattern, error) {
 // Returns:
 //   - *File: The parsed AST
 //   - error: nil if successful, otherwise the first error encountered
-func ParseFile(r io.Reader, fileName string) (*File, error) {
-	parser := NewParser(r, fileName)
+func ParseFile(r io.Reader, fileName string, source ...string) (*File, error) {
+	parser := NewParser(r, fileName, source...)
 	file, errors := parser.Parse()
 	if len(errors) > 0 {
 		return file, errors[0]
 	}
 	return file, nil
+}
+
+// lineContent returns the content of the specified line (1-indexed).
+// Returns empty string if line number is out of range or source is not available.
+func (p *Parser) lineContent(line int) string {
+	if p.source == "" || line <= 0 {
+		return ""
+	}
+	lines := strings.Split(p.source, "\n")
+	if line > len(lines) {
+		return ""
+	}
+	return lines[line-1]
 }
 
 // init is called to initialize the parser package.

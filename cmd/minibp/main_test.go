@@ -55,7 +55,7 @@ func TestRunGeneratesNinjaFile(t *testing.T) {
 	createOutputFile = func(path string) (io.WriteCloser, error) {
 		return nopWriteCloser{Writer: &generated}, nil
 	}
-	parseBlueprintFile = func(r io.Reader, fileName string) (*parser.File, error) {
+	parseBlueprintFile = func(r io.Reader, fileName string, source ...string) (*parser.File, error) {
 		return &parser.File{
 			Name: fileName,
 			Defs: []parser.Definition{
@@ -96,7 +96,7 @@ func TestParseDefinitionsFromFilesAggregatesParseErrors(t *testing.T) {
 	openInputFile = func(path string) (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader("")), nil
 	}
-	parseBlueprintFile = func(r io.Reader, fileName string) (*parser.File, error) {
+	parseBlueprintFile = func(r io.Reader, fileName string, source ...string) (*parser.File, error) {
 		return nil, errors.New("bad blueprint")
 	}
 
