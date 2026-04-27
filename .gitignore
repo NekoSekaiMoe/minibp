@@ -7,3 +7,4 @@ build.ninja
 .ninja_deps
 .ninja_log
 examples/libjava_classes/
+.minibp/

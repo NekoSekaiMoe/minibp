@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -39,6 +41,11 @@ func TestRunMissingInput(t *testing.T) {
 }
 
 func TestRunGeneratesNinjaFile(t *testing.T) {
+	// Create temp dir with Android.bp file so incremental manager can hash it
+	tmpDir := t.TempDir()
+	androidBp := filepath.Join(tmpDir, "Android.bp")
+	os.WriteFile(androidBp, []byte("python_test_host { name: \"smoke\", srcs: [\"smoke_test.py\"] }"), 0644)
+
 	oldOpen := openInputFile
 	oldCreate := createOutputFile
 	oldParse := parseBlueprintFile
@@ -73,7 +80,7 @@ func TestRunGeneratesNinjaFile(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := run([]string{"-o", "build.ninja", "Android.bp"}, &stdout, &stderr)
+	err := run([]string{"-o", "build.ninja", androidBp}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("run returned error: %v", err)
 	}
