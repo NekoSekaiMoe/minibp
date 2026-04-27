@@ -3,6 +3,22 @@
 // determining module enablement based on target type, and property merging logic.
 // This enables single Blueprint definitions to generate builds for multiple architectures
 // and platforms (e.g., arm64, arm, x86, x86_64, host, device).
+//
+// Variant handling is essential for supporting cross-platform builds where the same
+// source code needs to be compiled for different architectures and operating
+// systems. This package provides the logic for:
+//
+// Architecture Variants:
+//   - Different properties for arm, arm64, x86, x86_64, etc.
+//   - Selected via m.Arch[arch] property Maps
+//
+// Host/Device Variants:
+//   - m.Host for host-specific properties (Linux, macOS, Windows)
+//   - m.Target for device-specific properties (Android)
+//
+// Multilib Variants:
+//   - Different properties for 32-bit (lib32) and 64-bit (lib64) ABIs
+//   - Selected based on architecture bitness
 package variant
 
 import "minibp/lib/parser"
@@ -19,11 +35,15 @@ import "minibp/lib/parser"
 //  3. Host or Target properties (applied based on host bool)
 //  4. Multilib properties (highest priority for matching ABI)
 //
+// This function is called for each module during build graph construction
+// to prepare the final property set for the target configuration.
+//
 // Parameters:
-//   - m: The module to merge properties into
+//   - m: The module to merge properties into. Must have non-nil Map for merging to work.
 //   - arch: Target architecture (e.g., "x86", "x86_64", "arm", "arm64")
 //   - host: Whether this is a host build (true) or device build (false)
-//   - eval: The evaluator for resolving property values (used for future expansion)
+//   - eval: The evaluator for resolving property values (used for future expansion,
+//     currently not used but reserved for expression evaluation)
 //
 // Edge cases:
 //   - Empty arch string skips architecture-specific merging

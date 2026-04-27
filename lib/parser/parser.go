@@ -25,6 +25,10 @@
 //   Parse errors are collected and aggregated rather than failing immediately.
 //   This allows users to fix multiple issues in a single pass.
 //   The parser uses error recovery to skip to the next definition after an error.
+//
+// The parser is the second stage in the Blueprint pipeline, consuming tokens
+// from the lexer and producing AST nodes that represent the syntactic structure
+// of the Blueprint source code.
 package parser
 
 import (
@@ -824,6 +828,17 @@ func (p *Parser) parseMap() (*Map, error) {
 // - Tuple conditions: select((arch(), os()), { ... }) for multi-condition matching
 // - Unset patterns: select(arch(), { unset: value })
 // - Any patterns: select(arch(), { any: value }) or select(arch(), { any @var: value })
+// - Any @var binding: Binds the matched value to a variable for use in the result
+//
+// Example usage:
+//   srcs: select(arch(), {
+//       arm: ["arm.c"],
+//       arm64: ["arm64.c"],
+//       default: ["common.c"],
+//   })
+//
+// Parameters:
+//   - None (uses parser state)
 //
 // Returns:
 //   - *Select: The parsed select AST node

@@ -5,6 +5,10 @@
 // source code after parsing. Each type corresponds to a construct in
 // the Blueprint language.
 //
+// The AST is the intermediate representation produced by the parser and
+// consumed by the evaluator. It preserves the syntactic structure and source
+// position information needed for accurate error reporting.
+//
 // AST node categories:
 //   - Files: File (root node containing definitions)
 //   - Definitions: Module, Assignment (top-level constructs)
@@ -12,13 +16,14 @@
 //   - Supporting: Property, Map (key-value structures)
 //
 // All expression types implement the Expression interface:
-//   - String(): Returns string representation
+//   - String(): Returns string representation for debugging
 //   - Pos(): Returns source position for error reporting
 //
 // Design notes:
 //   - Properties are stored in ordered slices to preserve source order
 //   - Position information is kept for error messages
-//   - Select has dedicated condition and case structures
+//   - Select has dedicated condition and case structures for conditional evaluation
+//   - The AST is mutable - nodes may be modified during evaluation
 package parser
 
 import (

@@ -40,6 +40,10 @@ import (
 //             LBRACKET/RBRACKET (lists)
 //   - Operators: COLON (property separator), COMMA (separator), PLUS (concatenation),
 //             ASSIGN simple assignment (=), PLUSEQ (+=), UNSET (unset keyword), AT (@ binding)
+//
+// These token types are the fundamental building blocks that the parser uses to
+// understand the syntactic structure of Blueprint source files. The lexer converts
+// raw character input into a stream of these typed tokens for consumption by the parser.
 type TokenType int
 
 const (
@@ -83,6 +87,10 @@ const (
 //   - Token{Type: IDENT, Literal: "cc_binary", Pos: file.bp:1:1}
 //   - Token{Type: STRING, Literal: "\"hello\"", Pos: file.bp:2:5}
 //   - Token{Type: ASSIGN, Literal: "=", Pos: file.bp:3:10}
+//
+// The Token struct is the primary data structure that flows between the lexer
+// and parser. Each call to NextToken() returns one Token with complete information
+// needed for parsing and accurate error reporting.
 type Token struct {
 	Type    TokenType        // The type of this token
 	Literal string           // The actual text of the token (for identifiers, strings, etc.)
@@ -109,25 +117,44 @@ type Token struct {
 // Error handling:
 //   - Invalid characters are recorded in the errors slice
 //   - Scanning continues after errors for incremental reporting
+//
+// This lexer is the first stage in the Blueprint build system pipeline.
+// It sits between the raw input stream and the parser, converting character
+// sequences into meaningful tokens that represent the syntactic structure
+// of the Blueprint source code.
 type Lexer struct {
 	scanner scanner.Scanner // The underlying Go scanner - provides character scanning
 	ch      rune            // Current character being processed (cached for peeking)
 	errors  []error         // List of lexer errors encountered during scanning
 }
 
-// NewLexer creates a new lexer from an ioReader.
-// It initializes the Go scanner with appropriate mode settings for Blueprint:
-// - ScanIdents: Recognize identifiers
-// - ScanInts: Recognize integer literals
-// - ScanStrings: Recognize quoted strings ("...")
-// /- ScanRawStrings: Recognize raw strings (`...`)
-// - ScanComments: Skip comments
+// NewLexer creates a new lexer from an io.Reader.
+// It initializes the Go scanner with appropriate mode settings for Blueprint.
+//
+// The scanner is configured with the following modes:
+//   - ScanIdents: Recognize identifiers (variable names, module types)
+//   - ScanInts: Recognize integer literals (42, 100, -10)
+//   - ScanStrings: Recognize quoted strings ("hello", 'hello')
+//   - ScanRawStrings: Recognize raw strings (`hello`)
+//   - ScanComments: Skip comments entirely from the token stream
+//
+// The lexer also sets up:
+//   - Whitespace handling: Space, tab, newline, carriage return are skipped
+//   - Error callback: Lexer errors are collected in the errors slice
+//   - Filename tracking: The filename is stored for error reporting
+//
 // Parameters:
-//   - r: The input reader containing source code
-//   - fileName: The name of the file being lexed
+//   - r: The input reader containing Blueprint source code
+//   - fileName: The name of the file being lexed (used for error messages)
 //
 // Returns:
 //   - A new Lexer instance ready to produce tokens
+//
+// Example usage:
+//   lexer := NewLexer(strings.NewReader("cc_library { srcs: [\"*.c\"] }"), "Android.bp")
+//   for tok := lexer.NextToken(); tok.Type != EOF; tok = lexer.NextToken() {
+//       // Process token...
+//   }
 func NewLexer(r io.Reader, fileName string) *Lexer {
 	l := &Lexer{}
 	l.scanner.Init(r)
@@ -164,8 +191,27 @@ func (l *Lexer) peek() rune {
 // It handles all token types: special tokens (EOF, ILLEGAL), literals (IDENT, STRING, INT, BOOL),
 // and symbols (parentheses, braces, brackets, colon, comma, operators).
 // The lexer automatically skips comments and whitespace.
+//
+// Token processing flow:
+//   1. Record the current source position for the token
+//   2. Switch on the current character to determine token type
+//   3. For identifiers, further classify as keyword or regular identifier
+//   4. For multi-character tokens (=, +=), peek at the next character
+//   5. Advance to the next character
+//   6. Return the complete token
+//
+// Special handling:
+//   - '+' followed by '=': Returns PLUSEQ token, advances past both
+//   - 'true'/'false' identifiers: Returns BOOL token
+//   - 'unset' identifier: Returns UNSET token
+//   - Unknown characters: Returns ILLEGAL token, records error
+//
 // Returns:
 //   - Token: The next lexical token with type, literal value, and position
+//
+// Error cases:
+//   - Invalid characters are recorded but scanning continues
+//   - Negative character codes (end of input) return EOF token
 func (l *Lexer) NextToken() Token {
 	var tok Token
 	tok.Pos = l.scanner.Position
@@ -322,12 +368,23 @@ func (l *Lexer) Errors() []error {
 // Unquote removes quotes from a string literal.
 // This is a wrapper around strconv.Unquote that handles Go string syntax,
 // including escape sequences like \n, \t, \", etc.
+//
+// Supported string formats:
+//   - Double-quoted strings: "hello\nworld" - supports escape sequences
+//   - Single-quoted strings: 'hello' - supports escape sequences
+//   - Raw strings: `hello\nworld` - no escape processing
+//
 // Parameters:
 //   - s: A string literal (including quotes)
 //
 // Returns:
 //   - string: The unquoted string content
-//   - error: nil if successful, otherwise an error (e.g., invalid escape sequence)
+//   - error: nil if successful, otherwise an error (e.g., invalid escape sequence,
+//     unterminated string, invalid unicode surrogate)
+//
+// Example:
+//   Unquote(`"hello\nworld"`) -> "hello\nworld", nil
+//   Unquote("'unterminated") -> "", error
 func Unquote(s string) (string, error) {
 	return strconv.Unquote(s)
 }

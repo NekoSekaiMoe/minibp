@@ -37,9 +37,19 @@ import (
 )
 
 // Dependency represents a module dependency with name, version, and optional status.
-// Name is the unique identifier of the dependency module.
-// Version specifies the version constraint or exact version.
-// Optional indicates whether this dependency is required or optional.
+// A Dependency captures the relationship between a module and another module it depends on.
+// 
+// Dependencies are declared in module properties like "srcs", "deps", and "lib_deps".
+// The build system resolves these declarations into complete dependency graphs
+// for determining build order and detecting conflicts.
+//
+// Fields:
+//   - Name: The unique identifier of the dependency module. This is used
+//     to look up the dependency in the module registry.
+//   - Version: The version constraint or exact version string.
+//     Empty string means "any version" or "latest available".
+//   - Optional: Whether this dependency is required or optional.
+//     Optional dependencies don't cause build failures if missing.
 type Dependency struct {
 	Name     string
 	Version  string
@@ -53,6 +63,14 @@ type Dependency struct {
 // The graph uses two edge representations:
 //   - edges: forward mapping (module -> its dependencies) for dependency resolution
 //   - reverseEdges: reverse mapping (dependency -> modules that depend on it) for dependent lookup
+// This bidirectional structure supports efficient queries in both directions.
+//
+// The graph must be populated using AddModule before performing any
+// resolution operations. The typical workflow is:
+//  1. Create empty graph with NewDependencyGraph
+//  2. Add modules with AddModule (which also establishes edges)
+//  3. Call ResolveDependencies to compute transitive deps and topological order
+//  4. Query the graph using GetDependencies or GetDependents
 //
 // Fields:
 //   - modules: Map of module name to ModuleNode containing module metadata and dependencies
@@ -65,10 +83,11 @@ type DependencyGraph struct {
 }
 
 // ModuleNode represents a node in the dependency graph corresponding to a single module.
+// Each node tracks both direct and transitive dependencies, as well as which modules depend on it.
 //
-// Each node tracks both direct and transitive dependencies:
-//   - DirectDeps: dependencies explicitly declared in the module
-//   - AllDeps: all transitive dependencies (computed by ResolveDependencies)
+// This node structure is created when a module is added to the graph and is updated
+// during the dependency resolution process. The AllDeps field is populated
+// by calculateTransitiveDeps after all modules have been added.
 //
 // Fields:
 //   - Name: Unique identifier of the module
@@ -88,15 +107,20 @@ type ModuleNode struct {
 
 // Conflict represents a dependency version conflict detected during resolution.
 //
-// A conflict occurs when a dependency is required at different versions
-// by modules in different parts of the dependency tree.
+// A conflict occurs when a module depends on the same dependency at different versions
+// through different dependency paths. For example, if module A depends on
+// module B version 1.0, and module C (also depended on by A) depends on
+// module B version 2.0, this constitutes a version conflict.
+//
+// This conflict detection helps identify unsatisfiable dependency
+// requirements that would cause build failures at link time.
 //
 // Fields:
-//   - Module: The module where the conflict was detected
+//   - Module: The module where the conflict was detected (typically the common dependent)
 //   - DepName: The dependency name that has conflicting versions
 //   - Version1: First version required
 //   - Version2: Second (different) version required
-//   - Path1: List of modules requiring Version1
+//   - Path1: List of modules requiring Version1 (the dependency path)
 //   - Path2: List of modules requiring Version2
 type Conflict struct {
 	Module   string
@@ -109,14 +133,17 @@ type Conflict struct {
 
 // Resolution represents the result of dependency resolution.
 //
-// The resolution process:
-//  1. Calculates all transitive dependencies for each module
-//  2. Detects version conflicts between different dependency paths
-//  3. Computes a valid build order via topological sort
+// The resolution process computes:
+//  1. All transitive dependencies for each module
+//  2. Any version conflicts between different dependency paths
+//  3. A valid build order via topological sort
+//
+// The Resolution struct is returned by ResolveDependencies and indicates
+// whether the dependency graph is valid for building.
 //
 // Fields:
 //   - Success: True if resolution succeeded without conflicts
-//   - Conflicts: Slice of detected version conflicts
+//   - Conflicts: Slice of detected version conflicts (may be empty)
 //   - Order: Topological ordering of modules for build
 type Resolution struct {
 	Success   bool
@@ -131,7 +158,7 @@ type Resolution struct {
 // before any resolution or query operations can be performed.
 //
 // Returns:
-//   - *DependencyGraph: A new empty dependency graph instance
+//   - *DependencyGraph: A new empty dependency graph instance ready for AddModule calls
 func NewDependencyGraph() *DependencyGraph {
 	return &DependencyGraph{
 		modules:      make(map[string]*ModuleNode),
@@ -147,12 +174,15 @@ func NewDependencyGraph() *DependencyGraph {
 //   - forward edges (edges): module -> list of its dependencies
 //   - reverse edges (reverseEdges): dependency -> list of modules that depend on it
 //
+// The function should be called once for each module in the build system.
+// After all modules are added, call ResolveDependencies to compute
+// transitive dependencies and build order.
+//
 // Parameters:
 //   - name: Unique identifier for the module. Must not already exist in the graph.
 //   - moduleType: Type of the module (e.g., "cc_library", "java_library")
-//   - deps: Slice of Dependency objects representing direct dependencies
-//
-// Returns: No return value
+//   - deps: Slice of Dependency objects representing direct dependencies.
+//     Can be empty if the module has no dependencies.
 //
 // Edge cases:
 //   - If a module with the same name already exists, this function returns early
@@ -193,7 +223,7 @@ func (g *DependencyGraph) AddModule(name, moduleType string, deps []Dependency) 
 // ResolveDependencies resolves all dependencies in the graph and detects conflicts.
 //
 // This function performs three main operations:
-//  1. Calculates transitive dependencies for all modules
+//  1. Calculates transitive dependencies for all modules (via calculateTransitiveDeps)
 //  2. Detects version conflicts between different module paths
 //  3. Computes topological ordering for build
 //
@@ -201,8 +231,12 @@ func (g *DependencyGraph) AddModule(name, moduleType string, deps []Dependency) 
 // the dependency tree to collect all transitive dependencies. Then it
 // analyzes whether any dependency is required at multiple different versions.
 //
+// This is typically called after all modules have been added to the graph
+// and before generating the build file.
+//
 // Returns:
-//   - *Resolution: Resolution result containing success status, conflicts, and build order
+//   - *Resolution: Resolution result containing success status, conflicts, and build order.
+//     The Success field indicates whether the graph is valid for building.
 //
 // Edge cases:
 //   - If circular dependencies are detected, topological sort fails and Success is false
@@ -555,13 +589,16 @@ func (g *DependencyGraph) topologicalSort() ([]string, error) {
 // GetDependents returns all modules that directly depend on the given module.
 //
 // This function looks up the reverse edges mapping to find all modules that have
-// the specified module as a direct dependency.
+// the specified module as a direct dependency. It's useful for understanding
+// the impact of changes to a module - knowing what will need to be
+// rebuilt if a module changes.
 //
 // The reverseEdges map is maintained by AddModule whenever a dependency is added.
 // It's efficient for answering "what depends on X?" queries.
 //
 // Parameters:
-//   - moduleName: The name of the module to find dependents for
+//   - moduleName: The name of the module to find dependents for.
+//     Must be a valid module name in the graph.
 //
 // Returns:
 //   - []string: List of module names that depend on this module; may be empty
@@ -578,13 +615,16 @@ func (g *DependencyGraph) GetDependents(moduleName string) []string {
 //
 // This function returns the forward edges (dependency names) for the given module.
 // Unlike AllDeps (which includes transitive dependencies), this only returns
-// the dependencies explicitly declared in the module.
+// the dependencies explicitly declared in the module's properties.
+//
+// For example, if module A declares deps = ["B", "C"], then GetDependencies("A")
+// returns ["B", "C"], even if B depends on D.
 //
 // Parameters:
-//   - moduleName: The name of the module to get dependencies for
+//   - moduleName: The name of the module to get dependencies for.
 //
 // Returns:
-//   - []string: List of direct dependency names; may be empty
+//   - []string: List of direct dependency names; may be nil for modules with no deps
 //
 // Edge cases:
 //   - Unknown modules return nil (not empty slice)

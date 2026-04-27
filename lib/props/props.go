@@ -1,9 +1,29 @@
 // Package props provides property extraction helpers for Blueprint modules.
 // It offers functions to retrieve string, list, and boolean property values
 // from parsed module definitions, with optional variable evaluation.
+//
 // Property values in Blueprints may contain variable references (${VAR}),
 // select() expressions, and builtin function calls that require evaluation
-// through a parser.Evaluator.
+// through a parser.Evaluator. This package provides both raw access (without
+// evaluation) and evaluated access (with variable substitution).
+//
+// Function categories:
+//   - GetStringProp / GetStringPropEval: String property retrieval
+//   - GetListProp / GetListPropEval: List property retrieval
+//   - GetBoolProp: Boolean property retrieval with optional evaluation
+//
+// These functions are used throughout the build system to extract and use
+// module configuration values when generating ninja build rules. They provide
+// a consistent interface for accessing module properties regardless of the
+// underlying expression type.
+//
+// Design notes:
+//   - All functions perform linear search through module properties
+//   - This is acceptable because Blueprint modules typically have 10-50 properties
+//   - Functions are nil-safe: nil Map field returns empty/nil immediately
+//   - Type assertions ensure only matching types are returned
+//   - All functions treat empty string as "not set" - callers should use
+//     separate existence checks if empty values are meaningful
 package props
 
 import "minibp/lib/parser"

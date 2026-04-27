@@ -246,6 +246,15 @@ func NewEvaluatorFromConfig(cfg RunConfig) *parser.Evaluator {
 //   - Sysroot: Cross-compilation sysroot path.
 //   - Ccache: Ccache configuration ("no" to disable, path, or auto-detect).
 //
+// Returns:
+//
+//	A BuildOptions struct populated with configuration values from RunConfig.
+//
+// Edge cases:
+//
+//	If Arch is empty, defaults to runtime.GOARCH (current system architecture).
+//	The returned Inputs and Multilib slices are new slices (deep copied).
+//
 // Note: Variant and Product selectors are NOT copied here because they are
 // only used by the Evaluator during Blueprint parsing, not by the build
 // pipeline which operates on resolved module values.

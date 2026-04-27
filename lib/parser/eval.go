@@ -67,8 +67,13 @@ var UnsetSentinel = &struct{ name string }{name: "unset"}
 //
 // Evaluation model:
 //   - Variables are processed in source order (dependency order)
-//   - select() supports strict mode (error on no match) and permissive mode
+//   - select() supports strict mode (error on match) and permissive mode
 //   - All expressions are evaluated to Go native types
+//
+// The evaluator is the third stage in the Blueprint pipeline, sitting between
+// the parser (which produces AST nodes) and the ninja generator (which consumes
+// evaluated values). It transforms the abstract representation into concrete
+// values that can be used in build rules.
 type Evaluator struct {
 	vars         map[string]interface{} // Variable table: name -> value (string, int64, bool, []interface{}, map, etc.)
 	config       map[string]string      // Configuration: key (arch, os, host, target) -> value
@@ -744,7 +749,30 @@ func (e *Evaluator) isConfigUnset(val interface{}) bool {
 }
 
 // evalSelectCondition evaluates a select condition.
-// Conditions can be:
+// Conditions can be simple identifiers (like "arch", "os") or function calls
+// with arguments (like "target(android)"). The evaluator looks up the
+// condition value from its configuration map or variables.
+//
+// Built-in condition functions:
+//   - arch(): Current architecture (arm, arm64, x86, x86_64)
+//   - os(): Current operating system (linux, android, darwin)
+//   - host(): Whether building for host
+//   - target(): Target platform
+//   - variant(): Build variant (debug, release)
+//   - product_variable(): Product-specific variable
+//   - soong_config_variable(): Configuration variable from namespace
+//   - release_flag(): Release flag check
+//
+// Additional functions supported:
+//   - target(platform): Returns config["target"]
+//   - variant(name): Returns config["variant.name"] or config["variant"]
+//   - product_variable(name): Returns config["product.name"] or config["product"]
+//
+// Parameters:
+//   - cond: The condition to evaluate
+//
+// Returns:
+//   - interface{}: The condition value from config, vars, or nil if not found
 func (e *Evaluator) evalSelectCondition(cond ConfigurableCondition) interface{} {
 	if cond.FunctionName == "" {
 		if len(cond.Args) == 0 {

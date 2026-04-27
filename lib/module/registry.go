@@ -10,6 +10,16 @@
 //   - Factory interface: Creates Module from parser.Module AST nodes
 //   - Register/RegisterAlias: Adds new module types to the registry
 //   - Lookup/Create: Retrieves factories and creates module instances
+//
+// Module types are registered during package initialization via init()
+// functions in types.go. The built-in types include:
+//   - cc_library, cc_binary, cc_test (C/C++ libraries and binaries)
+//   - go_library, go_binary (Go packages)
+//   - java_library, java_binary (Java compilation)
+//   - filegroup (File aggregation)
+//   - genrule (Custom build commands)
+//   - prebuilt_* (Pre-built library references)
+//   - defaults (Default property inheritance)
 package module
 
 import (

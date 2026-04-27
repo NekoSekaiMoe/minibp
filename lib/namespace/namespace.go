@@ -17,6 +17,11 @@ import (
 // It contains the list of namespace imports that define which other
 // namespaces are visible within this namespace's scope.
 //
+// A namespace in Blueprint acts as a container for modules, controlling
+// module visibility and enabling modular build configurations. Modules
+// within a namespace can reference each other directly, while modules in other
+// namespaces require explicit namespace prefixes (e.g., "//otherns:module").
+//
 // Note:
 //   - Imports list may be empty if the namespace has no import declarations
 //   - The namespace itself is not included in its own Imports list
@@ -24,6 +29,7 @@ import (
 // Edge cases:
 //   - Empty Imports slice indicates no other namespaces are imported
 //   - Namespace without imports property results in empty Imports
+//   - Namespace with empty name property is invalid and skipped during BuildMap
 type Info struct {
 	// Imports is a list of namespace names that are imported into
 	// this namespace, allowing modules in those namespaces to be
@@ -42,13 +48,19 @@ type Info struct {
 // The imports property is expected to be a list of string values, each representing
 // another namespace that is visible within this namespace's scope.
 //
+// This function is called during the build pipeline (Step 5) to create the
+// namespace map used for resolving module references like "//ns:module".
+//
 // Parameters:
-//   - modules: A map from module names to their parsed Module representations
-//   - getStringProp: A function to retrieve a string property from a module by name
+//   - modules: A map from module names to their parsed Module representations.
+//     This map is created by buildlib.CollectModulesWithNames during the build process.
+//   - getStringProp: A function to retrieve a string property from a module by name.
+//     This allows flexible property access with optional evaluation.
 //
 // Returns:
 //   - A map from namespace names to their Info struct containing import lists.
 //     Namespaces without a valid name are excluded from the result.
+//     Returns empty map if no soong_namespace modules are found.
 //
 // Edge cases:
 //   - Modules without type "soong_namespace" are skipped
@@ -99,24 +111,33 @@ func BuildMap(modules map[string]*parser.Module, getStringProp func(*parser.Modu
 //
 // The function handles the following reference formats:
 //   - ":modulename" - shorthand for current namespace (strips leading colon)
+//     This indicates reference to a module in the current namespace context.
 //   - "//namespace:modulename" - fully qualified namespace reference
+//     This explicitly specifies which namespace contains the target module.
 //   - "modulename" - returns as-is if namespace not recognized
+//     Used for modules in the default/visibility namespace.
 //
 // The resolution algorithm:
-//  1. Strip leading colon for shorthand syntax
+//  1. Strip leading colon for shorthand syntax (":modulename" -> "modulename")
 //  2. Check for "//" prefix indicating fully qualified reference
 //  3. Extract namespace name between "//" and ":"
 //  4. Verify namespace exists in the namespace map
 //  5. Return module name if namespace found, otherwise return original reference
 //
+// This function is used by the dependency graph to resolve module references
+// in srcs, deps, and lib_deps properties during build graph construction.
+//
 // Parameters:
-//   - ref: The module reference string to resolve
-//   - namespaces: A map of namespace names to their Info structs
+//   - ref: The module reference string to resolve. Can be in any of the
+//     formats described above. Must not be empty for meaningful resolution.
+//   - namespaces: A map of namespace names to their Info structs.
+//     This map is created by BuildMap and contains all defined namespaces.
 //
 // Returns:
 //   - The resolved module name. For fully-qualified references that match an
 //     existing namespace, returns only the module name portion. For other
 //     references, returns the original reference with prefix removed.
+//     Returns empty string if input ref is empty.
 //
 // Edge cases:
 //   - References with "//" but no ":" separator return original reference
@@ -155,6 +176,11 @@ func ResolveModuleRef(ref string, namespaces map[string]*Info) string {
 // the merge by combining the override's properties with the base module's
 // properties using variant.MergeMapProps.
 //
+// The override mechanism allows build configurations to modify module properties
+// without creating entirely new modules. Common use cases include enabling
+// debug builds, changing compiler flags for specific configurations, or
+// adding conditional dependencies.
+//
 // The override module must be a distinct module from the base (i.e., cannot
 // reference itself). Both modules must have non-nil Map properties for the merge
 // to occur.
@@ -165,6 +191,9 @@ func ResolveModuleRef(ref string, namespaces map[string]*Info) string {
 //  3. Skip if base doesn't exist or is the same module
 //  4. Merge override Map properties into base Map using variant.MergeMapProps
 //  5. Update the module map with the merged base module
+//
+// This function is called during build graph construction (Step 6) to
+// apply any module overrides before generating the Ninja build file.
 //
 // Parameters:
 //   - modules: A map from module names to their parsed Module representations.
@@ -205,6 +234,11 @@ func ApplyOverrides(modules map[string]*parser.Module) {
 // This function extracts configuration variables and registers module
 // type aliases for the defined configuration namespace.
 //
+// soong_config_module_type allows build configurations to define custom
+// module types that wrap existing module types with pre-configured properties.
+// This is useful for creating platform-specific variants, toolchain configurations,
+// or language-specific shortcuts.
+//
 // For each soong_config_module_type module:
 //  1. Extracts the base module type, config namespace, and type name
 //  2. Processes the "vars" property to set configuration values
@@ -216,10 +250,14 @@ func ApplyOverrides(modules map[string]*parser.Module) {
 //  3. Process vars Map to set configuration values in evaluator
 //  4. Register type alias if not already registered
 //
+// This function is called during build pipeline initialization to register
+// custom module types before module collection begins.
+//
 // Parameters:
 //   - modules: A map from module names to their parsed Module representations
 //   - getStringProp: A function to retrieve a string property from a module by name
-//   - eval: The evaluator instance used to set configuration values
+//   - eval: The evaluator instance used to set configuration values.
+//     Configuration variables are set using eval.SetConfig for later resolution.
 //
 // Edge cases:
 //   - Modules without required properties are skipped

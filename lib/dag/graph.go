@@ -31,16 +31,30 @@ import (
 )
 
 // Graph represents a directed acyclic graph of module dependencies.
-// The graph tracks which modules exist and their dependency relationships,
-// enabling topological sorting for build order determination.
+// It is the core data structure for tracking build order and enabling
+// parallel execution of modules in the minibp build system.
+//
+// The graph is used by the build system to:
+//   - Determine the correct build order for modules
+//   - Enable parallel execution by grouping modules into levels
+//   - Detect circular dependencies that would make building impossible
+//   - Validate that all referenced modules exist in the build configuration
 //
 // The graph uses two internal data structures:
-//   - modules: maps module names to their Module objects
-//   - edges: maps module names to lists of their direct dependencies
+//   - modules: Maps module names to their Module objects for validation and lookup.
+//     This ensures all referenced modules are properly registered before building.
+//   - edges: Maps module names to lists of their direct dependencies.
+//     The edge direction follows build dependency: if A depends on B,
+//     then edge goes from A -> B, meaning B must be built before A.
 //
-// The edges direction follows the build dependency:
-// if A depends on B, then edge goes from A -> B.
-// This means B must be built before A.
+// Example: If module "app" depends on "lib1" and "lib2",
+// the edges map would contain: edges["app"] = ["lib1", "lib2"].
+// This means "lib1" and "lib2" must be built before "app".
+//
+// The edges direction is critical for correct build order:
+//   - from: The dependent module (the module that depends on others)
+//   - to: The dependency module (the module that must be built first)
+//   - edges[from] contains all modules that "from" depends on
 type Graph struct {
 	// modules stores all modules in the graph, keyed by module name.
 	// Used for validation and module lookup.
@@ -52,21 +66,28 @@ type Graph struct {
 	edges map[string][]string
 }
 
-// NewGraph creates a new empty dependency graph.
-// Returns a pointer to a newly initialized Graph with empty maps
-// for both modules and edges. This is the starting point for building
-// a dependency graph - modules and edges can be added using
-// AddModule and AddEdge methods respectively.
+// NewGraph creates and returns a new empty dependency graph.
+// This is the constructor function for the Graph type and serves as
+// the starting point for building a module dependency graph.
+//
+// The returned graph contains two initialized empty maps:
+//   - modules: Stores registered Module objects keyed by module name
+//   - edges: Stores dependency relationships keyed by dependent module name
+//
+// After creating the graph, use AddModule to register modules and
+// AddEdge to define dependency relationships between them.
 //
 // Returns:
-//   - *Graph: A newly initialized graph with no modules or edges.
+//   - *Graph: A pointer to a newly initialized Graph instance.
+//     The graph is ready to accept modules and edges immediately.
+//     Returns a non-nil pointer; the maps are initialized and ready for use.
 //
-// Example:
+// Example usage:
 //
 //	graph := dag.NewGraph()
 //	graph.AddModule(moduleA)
 //	graph.AddModule(moduleB)
-//	graph.AddEdge("A", "B")  // A depends on B
+//	graph.AddEdge("A", "B")  // Module A depends on module B
 func NewGraph() *Graph {
 	return &Graph{
 		modules: make(map[string]module.Module),
@@ -74,23 +95,37 @@ func NewGraph() *Graph {
 	}
 }
 
-// AddModule adds a module to the graph.
-// The module must implement the module.Module interface.
-// If the provided module is nil, no action is taken.
-// After adding, the module can be referenced by its Name() for
-// adding edges and retrieving dependencies.
+// AddModule registers a module with the dependency graph.
+// This method adds a module to the graph's module registry, making it
+// available for dependency tracking and topological sorting.
 //
-// This method also initializes an empty edges list for the module
-// if one doesn't already exist, allowing for modules with no dependencies.
+// The module must implement the module.Module interface, which provides
+// the Name() method used as the unique identifier in the graph.
+// After registration, the module can be referenced by name when adding
+// edges or querying dependencies.
+//
+// This method also ensures the module has an entry in the edges map
+// by initializing an empty dependency slice if one doesn't exist.
+// This design allows modules to be registered before their dependencies
+// are defined, providing flexibility in graph construction order.
 //
 // Parameters:
-//   - m: The module to add. Must not be nil. The module's Name()
-//     is used as the key in the modules map.
+//   - m: The module to register with the graph.
+//     Must implement the module.Module interface.
+//     The module's Name() method is used as the key in the modules map.
+//     If a module with the same name already exists, it will be replaced.
+//
+// Returns:
+//   - This method does not return a value.
+//   - On success, the module is added to g.modules and g.edges.
+//   - If m is nil, the method returns immediately without modification.
 //
 // Edge cases:
-//   - If m is nil, the function returns without modification.
-//   - If module with same name exists, it is replaced.
-//   - Module with no dependencies still gets empty edges list.
+//   - If m is nil: the function returns without any modification to the graph.
+//   - If module with same name exists: the existing entry is replaced (overwritten).
+//   - Module with no dependencies: still gets an empty edges list entry.
+//   - Module Name() returns empty string: creates entry with empty string key.
+//   - Concurrent access: not thread-safe; external synchronization required.
 func (g *Graph) AddModule(m module.Module) {
 	if m != nil {
 		g.modules[m.Name()] = m
@@ -102,26 +137,37 @@ func (g *Graph) AddModule(m module.Module) {
 	}
 }
 
-// AddEdge adds a dependency edge from 'from' to 'to'.
-// This represents that the module 'from' depends on module 'to'.
-// In other words, 'to' must be built/processed before 'from'.
+// AddEdge adds a dependency relationship between two modules in the graph.
+// This method records that the module named 'from' depends on the module named 'to',
+// meaning 'to' must be built or processed before 'from' during the build process.
 //
-// This method ensures both modules exist in the edges map by
-// initializing empty slices if they don't already exist.
-// It then appends 'to' to the list of dependencies for 'from'.
+// The method ensures both modules exist in the edges map by initializing
+// empty dependency slices if they do not already exist. This design allows
+// adding edges before all modules are registered with AddModule, providing
+// flexibility in the order of graph construction.
+//
+// After calling AddEdge("A", "B"), the edges map will contain an entry
+// where edges["A"] includes "B", indicating A depends on B.
 //
 // Parameters:
-//   - from: the name of the dependent module (the module that depends on another).
-//   - to: the name of the dependency module (the module that must be processed first).
+//   - from: The name of the dependent module (the module that depends on another).
+//     This module requires 'to' to be built before it can be built.
+//   - to: The name of the dependency module (the module that must be processed first).
+//     This module must be built before 'from' can be built.
 //
-// Note: AddEdge does not validate that the modules actually exist in the
-// graph; this validation is performed during TopoSort.
-// This allows adding edges before all modules are registered.
+// Important notes:
+//   - This method does not validate that the modules actually exist in the
+//     graph's modules map; validation is performed during TopoSort.
+//   - Duplicate edges are allowed here and will result in duplicate entries
+//     in the dependency list; TopoSort handles this by processing unique modules.
+//   - Self-dependencies (from == to) are allowed here but will be detected
+//     as cycles during topological sorting.
 //
 // Edge cases:
-//   - Either module doesn't exist in edges map: creates empty slice.
-//   - from == to (self-dependency): allowed here, caught in TopoSort.
-//   - Duplicate edge: results in duplicate dependency (handled in TopoSort).
+//   - If either module doesn't exist in edges map: creates an empty slice for it.
+//   - If from == to (self-dependency): allowed here, detected as cycle in TopoSort.
+//   - If duplicate edge exists: appends duplicate entry (handled in TopoSort).
+//   - Empty module names: will create entries with empty string keys.
 func (g *Graph) AddEdge(from, to string) {
 	// Ensure both modules exist in edges map
 	// Initialize empty slices for new modules
@@ -135,21 +181,32 @@ func (g *Graph) AddEdge(from, to string) {
 	g.edges[from] = append(g.edges[from], to)
 }
 
-// GetDeps returns the direct dependencies of a module by name.
-// A copy of the dependency slice is returned to prevent external
-// modification of the internal state.
+// GetDeps returns a copy of the direct dependencies for a named module.
+// This method retrieves all modules that the specified module directly depends on.
+// A copy of the internal dependency slice is returned to prevent external code
+// from modifying the graph's internal state, ensuring data integrity.
+//
+// The returned dependencies represent modules that must be built before
+// the queried module. For example, if module "app" depends on "lib1" and "lib2",
+// calling GetDeps("app") returns ["lib1", "lib2"].
 //
 // Parameters:
-//   - name: the name of the module to get dependencies for.
+//   - name: The name of the module to query for dependencies.
+//     This should be the name returned by module.Name() for registered modules.
 //
 // Returns:
-//   - A slice of strings containing the names of all direct dependencies.
-//   - An empty slice if the module doesn't exist or has no dependencies.
+//   - []string: A slice containing the names of all direct dependencies.
+//     The order matches the order in which dependencies were added via AddEdge.
+//     Returns a new slice (copy) each time, so modifications to the returned
+//     slice do not affect the internal graph state.
+//   - If the module name is not found in the edges map, returns an empty slice.
+//   - If the module exists but has no dependencies, returns an empty slice.
 //
 // Edge cases:
-//   - Module name doesn't exist: returns empty slice (no error).
-//   - Module has no dependencies: returns empty slice.
+//   - Module name doesn't exist in graph: returns empty slice (no error raised).
+//   - Module exists but has no dependencies: returns empty slice (not nil).
 //   - Returned slice is a copy; modifications don't affect internal state.
+//   - Concurrent access: not thread-safe; external synchronization required.
 func (g *Graph) GetDeps(name string) []string {
 	if deps, exists := g.edges[name]; exists {
 		// Return a copy to prevent external modification

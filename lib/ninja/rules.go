@@ -1,4 +1,4 @@
-// rules.go - Ninja rule interface and rule registry
+// rules.go - Ninja rule interface and rule registry for minibp.
 //
 // This file defines the BuildRule interface that all ninja rule implementations must satisfy,
 // the RuleRenderContext for toolchain configuration, and utility functions for module
@@ -46,10 +46,21 @@ import (
 //
 // Method purpose:
 //   - Name(): Unique identifier for this rule type (e.g., "cc_library", "go_binary")
+//     - Used to match module types in Blueprint files
+//     - Used by GetRule() to find rule implementations
 //   - NinjaRule(): Returns ninja rule definitions as a string (multiple rules separated by newlines)
+//     - Defines how to compile, link, archive, or package files
+//     - Called once per rule type during ninja file generation
 //   - NinjaEdge(): Returns ninja build edges for a specific module (what to build)
+//     - Called once per module instance
+//     - Generates the actual build commands for the module's sources
 //   - Outputs(): Returns the output file paths produced by this rule
+//     - Used for dependency resolution and build order determination
+//     - May include architecture suffix for multi-arch builds
 //   - Desc(): Returns a description string for build logging (e.g., "gcc", "jar", "go")
+//     - Displayed by ninja during the build process
+//     - Empty srcFile means this is a linking/packaging step
+//     - Non-empty srcFile means this is a compilation step
 //
 // Edge cases:
 //   - Empty srcs should still produce valid rule output
@@ -72,16 +83,40 @@ type BuildRule interface {
 //
 // Fields:
 //   - CC: C compiler command (e.g., "gcc", "clang", "/usr/bin/clang")
+//     - Used for linking and C compilation
+//     - May be prefixed with ccache path if ccache is enabled
 //   - CXX: C++ compiler command (e.g., "g++", "clang++", "/usr/bin/clang++")
+//     - Used for C++ compilation
+//     - Selected by detectCompilerType based on file extensions
 //   - AR: Static library archiver (e.g., "ar", "gcc-ar", "llvm-ar")
+//     - For LTO builds, ltoArchiveCmd may select an LTO-compatible archiver
 //   - ArchSuffix: Architecture-specific suffix for outputs (e.g., "_arm64", "_x86_64")
+//     - Appended to output file names for multi-architecture builds
+//     - Set by the build system based on current build variant
 //   - CFlags: Global C/C++ compiler flags (e.g., "-Wall -g")
+//     - Merged with module-specific cflags and cppflags
+//     - Applied to all C/C++ compilation commands
 //   - LdFlags: Global linker flags (e.g., "-lpthread")
+//     - Merged with module-specific ldflags
+//     - Applied to all linking commands
 //   - Sysroot: Cross-compilation sysroot path (e.g., "/opt/cross/arm64")
+//     - Used for cross-compilation to provide target system headers/libraries
+//     - May be passed to compiler/linker via --sysroot= flag
 //   - Ccache: Path to ccache binary (empty if ccache is not available)
+//     - When set, prepended to compiler commands for caching
+//     - Speeds up incremental builds by caching compilation results
 //   - Lto: Default LTO mode ("full", "thin", or "" for no LTO)
+//     - Can be overridden by module-level LTO settings
+//     - Affects both compilation and linking flags
 //   - GOOS: Go target operating system (e.g., "linux", "darwin", "windows")
+//     - Used for Go cross-compilation
+//     - Set as environment variable GOOS=X for go build
 //   - GOARCH: Go target architecture (e.g., "amd64", "arm64")
+//     - Used for Go cross-compilation
+//     - Set as environment variable GOARCH=Y for go build
+//   - PathPrefix: Prefix for file paths (used for namespace support)
+//     - Prepended to dependency file paths
+//     - Enables cross-namespace module references
 type RuleRenderContext struct {
 	CC         string
 	CXX        string
@@ -104,6 +139,10 @@ type RuleRenderContext struct {
 //
 // Returns:
 //   - RuleRenderContext with CC="gcc", CXX="g++", AR="ar"
+//
+// Note:
+//   - Ccache, Lto, Sysroot, GOOS, GOARCH are left empty (no defaults)
+//   - These must be set explicitly via command-line flags or build configuration
 func DefaultRuleRenderContext() RuleRenderContext {
 	return RuleRenderContext{
 		CC:  "gcc",
@@ -123,10 +162,18 @@ func DefaultRuleRenderContext() RuleRenderContext {
 //
 // The returned rules include:
 //   - C/C++ rules: cc_library, cc_library_static, cc_library_shared, cc_object, cc_binary, cc_library_headers
+//     - Handle C/C++ compilation, archiving, linking, and LTO
 //   - Go rules: go_library, go_binary, go_test
+//     - Handle Go compilation, cross-compilation, and testing
 //   - Java rules: java_library, java_binary, java_library_static, java_library_host, java_binary_host, java_test, java_import
-//   - Soong rules: defaults, package, soong_namespace, phony, cc_test, genrule, cc_defaults, java_defaults, go_defaults
+//     - Handle Java compilation, packaging, and manifest creation
+//   - Soong syntax rules: defaults, package, soong_namespace, phony, cc_test, genrule, cc_defaults, java_defaults, go_defaults
+//     - Handle Soong-specific module types and syntax
 //   - Other rules: filegroup, prebuilt_etc, prebuilt_usr_share, prebuilt_firmware, prebuilt_root, cc_prebuilt_binary, cc_prebuilt_library, cc_prebuilt_library_static, cc_prebuilt_library_shared, custom, proto_library, proto_gen, sh_binary_host, python_binary_host, python_test_host
+//     - Handle various other build scenarios and prebuilt artifacts
+//
+// Note: The order of rules in this slice doesn't affect functionality,
+// but related rules are grouped together for maintainability.
 func GetAllRules() []BuildRule {
 	return []BuildRule{
 		// C/C++ rules
@@ -199,6 +246,10 @@ func GetAllRules() []BuildRule {
 //	if rule != nil {
 //	    fmt.Println("Found:", rule.Name())
 //	}
+//
+// Edge cases:
+//   - Name not found: Returns nil
+//   - Multiple rules with same name: Returns first match (should not happen in practice)
 func GetRule(name string) BuildRule {
 	for _, r := range GetAllRules() {
 		if r.Name() == name {
@@ -216,8 +267,14 @@ func GetRule(name string) BuildRule {
 //
 // Property merging rules:
 //   - List properties (cflags, cppflags, srcs, etc.): Concatenated (defaults appended)
+//     - This allows defaults to add flags while target can override/add
+//     - Order: target values first, then defaults values
 //   - Non-list properties: Target module's value takes precedence
+//     - If target has the property, defaults value is ignored
+//     - If target doesn't have it, defaults value is added
 //   - Excluded properties: "name" and "defaults" are never merged
+//     - "name" is the module identifier and shouldn't be copied
+//     - "defaults" would cause recursive application
 //
 // Parameters:
 //   - m: The target module to apply defaults to
@@ -229,14 +286,15 @@ func GetRule(name string) BuildRule {
 //     a. Look up the default module (stripping leading ":" if present)
 //     b. Verify it's a defaults module type
 //     c. Merge each property from defaults to target:
-//     - For lists: Append default items to existing list
-//     - For non-lists: Use target value if exists, otherwise add from defaults
+//        - For lists: Append default items to existing list
+//        - For non-lists: Use target value if exists, otherwise add from defaults
 //
 // Edge cases:
-//   - Missing defaults module: Silently skipped
-//   - Circular references: Handled naturally (defaults don't recursively apply)
-//   - Empty defaults list: No-op
+//   - Missing defaults module: Silently skipped (no error)
+//   - Circular references: Handled naturally (defaults don't recursive apply)
+//   - Empty defaults list: No-op (function returns early)
 //   - nil Map on module: Returns early without error
+//   - Malformed property values: May cause issues in downstream processing
 //
 // Example:
 //
@@ -330,9 +388,13 @@ func ApplyDefaults(m *parser.Module, modules map[string]*parser.Module) {
 //   - []string: List of visibility rules, or nil if package not found or no default_visibility
 //
 // Edge cases:
-//   - Package module not found: Returns nil
-//   - No default_visibility property: Returns nil
-//   - Package module is nil: Skipped silently
+//   - Package module not found: Returns nil (no default visibility)
+//   - No default_visibility property: Returns nil (no default set)
+//   - Package module is nil: Skipped silently (continues search)
+//   - Multiple package modules: Returns first match (undefined behavior)
+//
+// Note: Package modules are named after their package path.
+// Matching checks both exact name and suffix (handles "foo" and "path/to/foo").
 func GetDefaultVisibility(modules map[string]*parser.Module, packageName string) []string {
 	// Look for package module in the given package
 	for name, mod := range modules {
@@ -362,14 +424,22 @@ func GetDefaultVisibility(modules map[string]*parser.Module, packageName string)
 //   - []string: List of visibility rules from closest matching package, or nil
 //
 // Algorithm:
-//  1. Split module path into components
+//  1. Split module path into components by "/"
 //  2. Starting from full path, check each ancestor for package module
-//  3. Return first default_visibility found (closest ancestor wins)
+//  3. Try progressively shorter paths (finds closest ancestor first)
+//  4. Return first default_visibility found (closest ancestor wins)
 //
 // Example:
 //
 //	modulePath = "libs/foo/bar"
 //	Checks: "libs/foo/bar", "libs/foo", "libs", ""
+//	If "libs/foo" has default_visibility, it will be returned
+//	Even if "libs" also has default_visibility
+//
+// Edge cases:
+//   - No package module found: Returns nil (no default visibility)
+//   - Multiple package modules at same level: Returns first match (undefined behavior)
+//   - Empty path: Returns nil (root package not typically defined)
 func GetPackageDefaultVisibility(modules map[string]*parser.Module, modulePath string) []string {
 	// Try to find package module at the same level and traverse up
 	parts := strings.Split(modulePath, "/")
@@ -391,15 +461,22 @@ func GetPackageDefaultVisibility(modules map[string]*parser.Module, modulePath s
 // references found in srcs, deps, and lib_deps properties.
 //
 // Fields:
-//   - ModuleName: The name of the referenced module
+//   - ModuleName: The name of the referenced module (e.g., "libfoo")
+//     - Used to look up the module in the modules map
+//     - Should not include ":" prefix or namespace prefix
 //   - Tag: Optional tag for specific outputs (e.g., ".doc.zip", ".stripped")
+//     - Used to select specific output variants from the referenced module
+//     - Empty string means all outputs or default output
 //   - IsModuleRef: True if this is a module reference (starts with ":" or "//...:")
+//     - Used to distinguish module references from regular file paths
+//     - False for regular file paths like "src/foo.c"
 //
 // Examples:
 //
 //	":libfoo" -> ModuleName="libfoo", Tag="", IsModuleRef=true
 //	":libfoo.shared" -> ModuleName="libfoo", Tag=".shared", IsModuleRef=true
 //	"//other:lib" -> ModuleName="lib", Tag="", IsModuleRef=true
+//	"src/foo.c" -> ModuleName="", Tag="", IsModuleRef=false
 type ModuleReference struct {
 	ModuleName  string // The name of the referenced module
 	Tag         string // Optional tag for specific outputs (e.g., ".doc.zip")
@@ -410,7 +487,7 @@ type ModuleReference struct {
 //
 // This function handles various module reference formats:
 //   - ":module" - simple module reference
-//   - ":module{.tag}" - module reference with tag
+//   - ":module{.tag}" - module reference with tag for specific output
 //   - "//namespace:module" - cross-namespace reference
 //
 // Parameters:
@@ -421,8 +498,16 @@ type ModuleReference struct {
 //
 // Edge cases:
 //   - Empty string: Returns nil
-//   - String without ":" prefix: Returns nil
-//   - Malformed tag (missing closing "}"): Tag part is ignored
+//   - String without ":" prefix: Returns nil (not a module reference)
+//   - Malformed tag (missing closing "}"): Tag part is ignored, module name still parsed
+//   - Cross-namespace "//namespace:module": ModuleName set to part after ":"
+//
+// Examples:
+//
+//	ParseModuleReference(":libfoo") -> &ModuleReference{ModuleName: "libfoo", Tag: "", IsModuleRef: true}
+//	ParseModuleReference(":libfoo{.shared}") -> &ModuleReference{ModuleName: "libfoo", Tag: ".shared", IsModuleRef: true}
+//	ParseModuleReference("//other:lib") -> &ModuleReference{ModuleName: "lib", Tag: "", IsModuleRef: true}
+//	ParseModuleReference("src/foo.c") -> nil (not a module reference)
 func ParseModuleReference(s string) *ModuleReference {
 	s = strings.TrimSpace(s)
 
@@ -464,20 +549,31 @@ func ParseModuleReference(s string) *ModuleReference {
 // to concrete file paths that Ninja can understand.
 //
 // Parameters:
-//   - ref: The parsed module reference
-//   - modules: Map of all modules (name -> module)
-//   - ctx: Rule render context for output name generation
+//   - ref: The parsed module reference (must have ModuleName set)
+//   - modules: Map of all modules (name -> module) for lookup
+//   - ctx: Rule render context for output name generation (architecture suffix, etc.)
 //
 // Returns:
 //   - []string: List of output file paths, or nil if module not found
 //
 // Edge cases:
-//   - nil reference: Returns nil
-//   - Not a module reference: Returns nil
-//   - Module type not registered: Returns nil
-//   - Module has no outputs: Returns nil
-//   - Tag ".stamp": Returns first output with ".stamp" appended
+//   - nil reference: Returns nil (nothing to resolve)
+//   - Not a module reference: Returns nil (should not happen if called correctly)
+//   - Module type not registered: Returns nil (unknown module type)
+//   - Module has no outputs: Returns nil (nothing to link against)
+//   - Tag ".stamp": Returns first output with ".stamp" appended (for tracking)
 //   - Other tags: Returns first output with tag suffix appended
+//   - Module not found in map: Returns nil (broken reference)
+//
+// Examples:
+//
+//	ref := ParseModuleReference(":libfoo")
+//	outputs := ResolveModuleOutputs(ref, modules, ctx)
+//	// outputs might be ["libfoo.a"] or ["libfoo_arm64.so"]
+//
+//	ref := ParseModuleReference(":libfoo{.shared}")
+//	outputs := ResolveModuleOutputs(ref, modules, ctx)
+//	// outputs might be ["libfoo.so"] (first output + ".shared" tag)
 func ResolveModuleOutputs(ref *ModuleReference, modules map[string]*parser.Module, ctx RuleRenderContext) []string {
 	// Validate reference
 	if ref == nil || !ref.IsModuleRef {
@@ -542,6 +638,13 @@ func ResolveModuleOutputs(ref *ModuleReference, modules map[string]*parser.Modul
 //   - Unresolved module reference: Still included as-is (may cause build error later)
 //   - Module with multiple outputs: All outputs are included
 //   - Empty input list: Returns empty list
+//   - Module not found: Reference string is used as-is (preserving original intent)
+//
+// Example:
+//
+//	items := []string{":libfoo", "src/bar.c"}
+//	expanded := ExpandModuleReferences(items, modules, ctx)
+//	// expanded might be ["libfoo.a", "src/bar.c"]
 func ExpandModuleReferences(items []string, modules map[string]*parser.Module, ctx RuleRenderContext) []string {
 	var result []string
 
@@ -564,12 +667,17 @@ func ExpandModuleReferences(items []string, modules map[string]*parser.Module, c
 //
 // Public visibility allows the module to be accessed from any other module
 // in the build system, regardless of package boundaries.
+// This is the most permissive visibility setting.
 //
 // Parameters:
 //   - vis: Slice of visibility rules to check
 //
 // Returns:
 //   - true if "//visibility:public" is in the list, false otherwise
+//
+// Edge cases:
+//   - nil or empty slice: Returns false
+//   - Multiple entries: Returns true if any entry matches
 func IsVisibilityPublic(vis []string) bool {
 	for _, v := range vis {
 		if v == "//visibility:public" {
@@ -581,14 +689,19 @@ func IsVisibilityPublic(vis []string) bool {
 
 // IsVisibilityPrivate checks if a visibility list contains "//visibility:private".
 //
-// Private visibility restricts the module to be visible only within the
-// same package. Other packages cannot reference this module.
+// Private visibility restricts the module to be visible only within the same package.
+// Other packages cannot reference this module.
+// This is the most restrictive visibility setting (opposite of public).
 //
 // Parameters:
 //   - vis: Slice of visibility rules to check
 //
 // Returns:
 //   - true if "//visibility:private" is in the list, false otherwise
+//
+// Edge cases:
+//   - nil or empty slice: Returns false
+//   - Multiple entries: Returns true if any entry matches
 func IsVisibilityPrivate(vis []string) bool {
 	for _, v := range vis {
 		if v == "//visibility:private" {
@@ -601,13 +714,18 @@ func IsVisibilityPrivate(vis []string) bool {
 // IsVisibilityOverride checks if a visibility list contains "//visibility:override".
 //
 // Override visibility is used to override a parent's visibility setting.
-// This is typically used in specific build configurations.
+// This is typically used in specific build configurations
+// where the default visibility needs to be bypassed.
 //
 // Parameters:
 //   - vis: Slice of visibility rules to check
 //
 // Returns:
 //   - true if "//visibility:override" is in the list, false otherwise
+//
+// Edge cases:
+//   - nil or empty slice: Returns false
+//   - Multiple entries: Returns true if any entry matches
 func IsVisibilityOverride(vis []string) bool {
 	for _, v := range vis {
 		if v == "//visibility:override" {
@@ -638,6 +756,21 @@ func IsVisibilityOverride(vis []string) bool {
 //
 // Returns:
 //   - true if the rule is valid, false otherwise
+//
+// Edge cases:
+//   - Empty string: Returns false (not a valid visibility rule)
+//   - Malformed rule: Returns false (only exact matches are valid)
+//   - Partial match: Returns false (e.g., "//visibility:pub" is not valid)
+//   - Extra spaces: Returns false (whitespace is not trimmed)
+//
+// Examples:
+//
+//	IsValidVisibilityRule("//visibility:public") -> true
+//	IsValidVisibilityRule("//visibility:private") -> true
+//	IsValidVisibilityRule("//libs:__pkg__") -> true
+//	IsValidVisibilityRule(":__subpackages__") -> true
+//	IsValidVisibilityRule("invalid") -> false
+//	IsValidVisibilityRule("") -> false
 func IsValidVisibilityRule(rule string) bool {
 	// Check standard visibility prefixes
 	validPrefixes := []string{

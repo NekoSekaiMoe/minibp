@@ -17,6 +17,11 @@
 // Recursive globs use ** to match zero or more directory levels:
 //   - ** matches any number of path segments
 //   - src/**/*.java matches java files in src and any subdirectory
+//
+// Performance considerations:
+//   - Glob results are cached to avoid redundant filesystem scans
+//   - Recursive globs determine optimal walk root to minimize traversal
+//   - Results are deduplicated to handle overlapping patterns
 package glob
 
 import (
@@ -47,6 +52,7 @@ var (
 // The function iterates through the module's properties looking for "srcs",
 // then processes each value in the srcs list. Patterns containing "*"
 // are expanded using expandGlob; others are kept as-is.
+// Results are cached globally to avoid redundant filesystem operations.
 //
 // Parameters:
 //   - m: The parser.Module whose srcs property should be processed.
@@ -120,12 +126,17 @@ func ExpandInModule(m *parser.Module, baseDir string) error {
 // expands them in a single pass, and caches the results in globCache.
 // This is much more efficient than expanding globs for each module individually.
 //
+// This function should be called before ExpandInModule to pre-populate the cache.
+// It scans all modules to collect patterns, then expands them all at once,
+// allowing shared patterns to be resolved only once.
+//
 // Parameters:
 //   - modules: A map of all modules to process.
 //   - baseDir: The base directory for resolving glob patterns.
 //
 // Returns:
 //   - error: Any error encountered during glob expansion.
+//     Returns error if any pattern expansion fails.
 func ExpandGlobs(modules map[string]*parser.Module, baseDir string) error {
 	patterns := make(map[string]bool)
 	for _, m := range modules {
