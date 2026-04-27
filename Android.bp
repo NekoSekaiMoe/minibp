@@ -33,6 +33,7 @@ go_binary {
     ":libversion",
     ":libtoolchain",
     ":liberrors",
+    ":libpathutil",
   ],
   goflags: ["-trimpath"],
   ldflags: [
@@ -66,6 +67,13 @@ go_library {
     ":libparser",
     ":libprops",
     ":libvariant",
+  ],
+}
+
+go_library {
+  name: "libpathutil",
+  srcs: [
+    "lib/pathutil/pathutil.go",
   ],
 }
 

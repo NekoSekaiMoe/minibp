@@ -10,6 +10,7 @@ import (
 
 	buildlib "minibp/lib/build"
 	"minibp/lib/namespace"
+	"minibp/lib/pathutil"
 	"minibp/lib/parser"
 	"minibp/lib/props"
 	applib "minibp/lib/utils"
@@ -24,7 +25,7 @@ var (
 	openInputFile func(path string) (io.ReadCloser, error) = func(path string) (io.ReadCloser, error) {
 		// Sanitize path to prevent directory traversal attacks.
 		// This ensures that files outside the intended directory cannot be accessed.
-		cleanPath := applib.SanitizePath(path)
+		cleanPath := pathutil.SanitizePath(path)
 		if cleanPath != path {
 			return nil, fmt.Errorf("invalid path: contains '..'")
 		}

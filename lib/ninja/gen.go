@@ -1104,7 +1104,7 @@ func (g *Generator) javaDepOutputs(moduleName string, ctx RuleRenderContext) []s
 		for _, out := range rule.Outputs(depMod, ctx) {
 			if strings.HasSuffix(out, ".jar") && !seen[out] {
 				seen[out] = true
-				outputs = append(outputs, g.adjustBuildPath(out, true))
+				outputs = append(outputs, out)
 			}
 		}
 	}
@@ -1141,11 +1141,8 @@ func (g *Generator) addJavaDepsToEdge(m *parser.Module, edge string) string {
 				continue
 			}
 			ruleName := ruleAndInputs[0]
+			// Add jar deps as implicit deps on javac_ and jar_ build edges
 			if strings.HasPrefix(ruleName, "javac_") || strings.HasPrefix(ruleName, "jar_") {
-				lines[i] = line + " | " + strings.Join(depJars, " ")
-			}
-			// For .run targets, add implicit deps
-			if strings.HasSuffix(ruleName, ".run") {
 				lines[i] = line + " | " + strings.Join(depJars, " ")
 			}
 			continue
@@ -1372,7 +1369,8 @@ func (g *Generator) distEdgesForModule(m *parser.Module, ctx RuleRenderContext) 
 //   - Don't already have the path prefix
 //   - Don't start with / (absolute path)
 //   - Don't start with .. (parent directory)
-//   - Don't end with .o, .jar, or .stamp (generated files)
+//   - Are file paths that need to be relative to build dir
+//   - Are not generated files (.o, .jar, .stamp, .d)
 //
 // Parameters:
 //   - path: File path to check
@@ -1383,10 +1381,21 @@ func (g *Generator) shouldPrefixInputPath(path string) bool {
 	if g.pathPrefix == "" {
 		return false
 	}
-	return !strings.HasPrefix(path, "$") &&
-		!strings.HasPrefix(path, g.pathPrefix) &&
-		!strings.HasPrefix(path, "/") &&
-		!strings.HasPrefix(path, "..")
+	if strings.HasPrefix(path, "$") ||
+		strings.HasPrefix(path, g.pathPrefix) ||
+		strings.HasPrefix(path, "/") ||
+		strings.HasPrefix(path, "..") {
+		return false
+	}
+	// Don't prefix generated files that are in build dir
+	if strings.HasSuffix(path, ".o") ||
+		strings.HasSuffix(path, ".jar") ||
+		strings.HasSuffix(path, ".stamp") ||
+		strings.HasSuffix(path, ".d") {
+		return false
+	}
+	// Prefix paths that contain / OR are shared library files (.so)
+	return strings.Contains(path, "/") || strings.HasSuffix(path, ".so")
 }
 
 // shouldPrefixOutputPath determines if an output path should have the path prefix prepended.
@@ -1394,8 +1403,7 @@ func (g *Generator) shouldPrefixInputPath(path string) bool {
 //   - Are not empty
 //   - Don't already have the path prefix
 //   - Don't start with / (absolute path)
-//   - Don't start with .. (parent directory)
-//   - Contain a / (are in a subdirectory)
+//   - Are file paths (contain /) not module names
 //
 // Parameters:
 //   - path: File path to check
@@ -1408,7 +1416,8 @@ func (g *Generator) shouldPrefixOutputPath(path string) bool {
 	}
 	return path != "" &&
 		!strings.HasPrefix(path, g.pathPrefix) &&
-		!strings.HasPrefix(path, "/")
+		!strings.HasPrefix(path, "/") &&
+		strings.Contains(path, "/")
 }
 
 // adjustBuildPath adjusts a single build path (input or output) by prepending the path prefix.

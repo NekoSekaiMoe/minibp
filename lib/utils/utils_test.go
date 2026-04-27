@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"testing"
 
-	buildlib "minibp/lib/build"
 	"minibp/lib/parser"
 )
 
@@ -283,9 +282,10 @@ func TestBuildOptionsCopiesFields(t *testing.T) {
 		LTO:      "none",
 		Sysroot:  "/sys",
 		Ccache:   "/usr/bin/ccache",
+		TargetOS: "linux",
 	}
 	opts := cfg.BuildOptions()
-	want := buildlib.Options{
+	want := BuildOptions{
 		Arch:     "arm64",
 		SrcDir:   "/src",
 		OutFile:  "build.ninja",
@@ -297,9 +297,10 @@ func TestBuildOptionsCopiesFields(t *testing.T) {
 		LTO:      "none",
 		Sysroot:  "/sys",
 		Ccache:   "/usr/bin/ccache",
+		TargetOS: "linux",
 	}
 	if !reflect.DeepEqual(opts, want) {
-		t.Fatalf("expected %v, got %v", want, opts)
+		t.Fatalf("expected %#v, got %#v", want, opts)
 	}
 }
 

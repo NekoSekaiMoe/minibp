@@ -14,25 +14,13 @@ import (
 	"runtime"
 	"strings"
 
+	"minibp/lib/build"
 	"minibp/lib/parser"
 	"minibp/lib/version"
 )
 
-// BuildOptions is a local copy of build.Options to avoid import cycles.
-type BuildOptions struct {
-	Arch     string
-	SrcDir   string
-	OutFile  string
-	Inputs   []string
-	Multilib []string
-	CC       string
-	CXX      string
-	AR       string
-	LTO      string
-	Sysroot  string
-	Ccache   string
-	TargetOS string
-}
+// BuildOptions is a local alias for build.Options to avoid import cycles.
+type BuildOptions = build.Options
 // RunConfig holds the command-line configuration for a minibp execution.
 // It encapsulates all flag values and derived settings needed to parse
 // Blueprint files and generate Ninja build rules.
@@ -470,20 +458,5 @@ func setKeyValueConfigs(eval *parser.Evaluator, prefix, raw string) {
 			continue
 		}
 		eval.SetConfig(prefix+key, val)
-	}
-}
-
-// SanitizePath removes '..' from a path to prevent directory traversal.
-// It repeatedly replaces "../" and "..\" with an empty string until no
-// more occurrences are found. This is a simple but effective way to
-// mitigate path traversal vulnerabilities.
-func SanitizePath(path string) string {
-	for {
-		cleaned := strings.ReplaceAll(path, "../", "")
-		cleaned = strings.ReplaceAll(cleaned, "..\\", "")
-		if cleaned == path {
-			return cleaned
-		}
-		path = cleaned
 	}
 }

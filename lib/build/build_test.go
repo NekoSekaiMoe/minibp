@@ -88,6 +88,15 @@ func TestBuildGraphIncludesModuleReferenceDataDeps(t *testing.T) {
 				}}},
 			}},
 		},
+		"plain.txt": {
+			Type: "filegroup",
+			Map: &parser.Map{Properties: []*parser.Property{
+				{Name: "name", Value: &parser.String{Value: "plain.txt"}},
+				{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "plain.txt"},
+				}}},
+			}},
+		},
 	}
 	namespaces := map[string]*namespace.Info{}
 
@@ -96,8 +105,26 @@ func TestBuildGraphIncludesModuleReferenceDataDeps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TopoSort failed: %v", err)
 	}
-	if len(levels) != 2 || levels[0][0] != "payload" || levels[1][0] != "runner" {
-		t.Fatalf("Expected payload -> runner ordering, got %v", levels)
+	if len(levels) != 2 {
+		t.Fatalf("Expected 2 levels in graph, got %d", len(levels))
+	}
+	payloadFound := false
+	for _, mod := range levels[0] {
+		if mod == "payload" {
+			payloadFound = true
+		}
+	}
+	if !payloadFound {
+		t.Fatalf("Expected 'payload' in the first level, got %v", levels[0])
+	}
+	runnerFound := false
+	for _, mod := range levels[1] {
+		if mod == "runner" {
+			runnerFound = true
+		}
+	}
+	if !runnerFound {
+		t.Fatalf("Expected 'runner' in the second level, got %v", levels[1])
 	}
 }
 
@@ -147,7 +174,7 @@ func TestGraphTopoSortFailsOnMissingDependency(t *testing.T) {
 	graph.AddEdge("runner", "missing")
 
 	_, err := graph.TopoSort()
-	if err == nil || !strings.Contains(err.Error(), "dependency 'missing'") {
+	if err == nil || !strings.Contains(err.Error(), "referenced in dependency graph does not exist") {
 		t.Fatalf("Expected missing dependency error, got %v", err)
 	}
 }

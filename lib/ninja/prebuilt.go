@@ -35,9 +35,9 @@ package ninja
 import (
 	"fmt"
 	"minibp/lib/parser"
-	"minibp/lib/utils"
 	"path/filepath"
 	"strings"
+	"minibp/lib/pathutil"
 )
 
 func sanitizePathComponent(s string) string {
@@ -96,7 +96,7 @@ func (r *prebuiltEtcRule) Outputs(m *parser.Module, ctx RuleRenderContext) []str
 	out := filename
 	if r.subdir != "" {
 		// Sanitize subdir to prevent path traversal.
-		safeSubdir := utils.SanitizePath(r.subdir)
+		safeSubdir := pathutil.SanitizePath(r.subdir)
 		out = filepath.Join(safeSubdir, filename)
 	}
 	// Use forward slashes for ninja consistency.
