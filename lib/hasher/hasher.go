@@ -532,6 +532,7 @@ func (h *Hasher) NeedsRebuild(moduleName string) (bool, error) {
 //
 // Returns:
 //   - error: Non-nil if directory creation or file write fails
+//
 // sanitizeHashPath sanitizes a module name for use as a filename.
 //
 // This function prevents path traversal attacks by replacing path separators

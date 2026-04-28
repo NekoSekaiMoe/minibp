@@ -111,11 +111,11 @@ func (s ErrorSeverity) String() string {
 // Used to pinpoint the exact location of an error in a .bp file.
 // Line and Column are 1-indexed to match text editor conventions.
 type Location struct {
-	File           string // File name relative to the build root (empty if unknown)
-	Line          int    // Line number (1-indexed, 0 if unknown)
-	Column        int    // Column number (1-indexed, 0 if unknown)
-	Content       string // Content of the current line (may be empty if not loaded)
-	ContentCaret  int    // Length of the caret marker (^^^^^) for Content highlighting
+	File         string // File name relative to the build root (empty if unknown)
+	Line         int    // Line number (1-indexed, 0 if unknown)
+	Column       int    // Column number (1-indexed, 0 if unknown)
+	Content      string // Content of the current line (may be empty if not loaded)
+	ContentCaret int    // Length of the caret marker (^^^^^) for Content highlighting
 }
 
 // ErrorContext provides additional context for an error.
@@ -301,22 +301,22 @@ func (e *BuildError) Format() string {
 		}
 		sb.WriteString(fmt.Sprintf(" --> %s\n", loc))
 
-// Code content and pointer
-	// Only show if Content is provided; shows the line with error marker
-	if e.Location.Content != "" {
-		sb.WriteString(" |\n")
-		sb.WriteString(fmt.Sprintf("%d | %s\n", e.Location.Line, e.Location.Content))
-		sb.WriteString(" | ")
-		// Determine caret length: use ContentCaret if set, otherwise default to 5
-		caretLen := 5
-		if e.Location.ContentCaret > 0 {
-			caretLen = e.Location.ContentCaret
+		// Code content and pointer
+		// Only show if Content is provided; shows the line with error marker
+		if e.Location.Content != "" {
+			sb.WriteString(" |\n")
+			sb.WriteString(fmt.Sprintf("%d | %s\n", e.Location.Line, e.Location.Content))
+			sb.WriteString(" | ")
+			// Determine caret length: use ContentCaret if set, otherwise default to 5
+			caretLen := 5
+			if e.Location.ContentCaret > 0 {
+				caretLen = e.Location.ContentCaret
+			}
+			// Point to column position with ^^^ markers
+			sb.WriteString(strings.Repeat(" ", e.Location.Column-1))
+			sb.WriteString(strings.Repeat("^", caretLen))
+			sb.WriteString("\n")
 		}
-		// Point to column position with ^^^ markers
-		sb.WriteString(strings.Repeat(" ", e.Location.Column-1))
-		sb.WriteString(strings.Repeat("^", caretLen))
-		sb.WriteString("\n")
-	}
 	}
 
 	// Context code snippet

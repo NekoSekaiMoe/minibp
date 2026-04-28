@@ -15,9 +15,9 @@
 //   - Dependency resolution via deps property (links .a files)
 //
 // Build process overview:
-//   1. go build -buildmode=archive compiles sources into .a archives (libraries)
-//   2. go build compiles sources into standalone executables (binaries)
-//   3. go test -c compiles test sources into test executables
+//  1. go build -buildmode=archive compiles sources into .a archives (libraries)
+//  2. go build compiles sources into standalone executables (binaries)
+//  3. go test -c compiles test sources into test executables
 //
 // Key design decisions:
 //   - Output naming: Uses "{name}{suffix}" for binaries, "{name}{suffix}.a" for libraries
@@ -89,7 +89,8 @@ func (r *goLibrary) Name() string { return "go_library" }
 // Environment variables ${GOOS_GOARCH} control cross-compilation target.
 //
 // The rule uses env command to set GOOS/GOARCH environment variables:
-//   env ${GOOS_GOARCH} go build -buildmode=archive -o $out $in
+//
+//	env ${GOOS_GOARCH} go build -buildmode=archive -o $out $in
 //
 // Parameters:
 //   - ctx: Rule render context (not used directly, but required by interface)
@@ -102,7 +103,7 @@ func (r *goLibrary) Name() string { return "go_library" }
 //   - GOOS_GOARCH variable is set per-variant in NinjaEdge
 func (r *goLibrary) NinjaRule(ctx RuleRenderContext) string {
 	return `rule go_build_archive
-  command = env ${GOOS_GOARCH} go build -buildmode=archive -o $out $in
+  command = $cmd
 
 `
 }
@@ -213,20 +214,15 @@ func (r *goLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 func (r *goLibrary) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext, goos, goarch string) string {
 	name := getName(m)
 	srcs := getSrcs(m)
-	goflags := getGoflags(m)
-	ldflags := getLdflags(m)
+	goflags := GetListProp(m, "goflags")
+	ldflags := GetListProp(m, "ldflags")
 
 	envVar, suffix, _, _ := goVariantEnvVars(goos, goarch)
 	out := fmt.Sprintf("%s%s.a", name, suffix)
+	cmd := goBuildCmd(envVar, goflags, ldflags, "-buildmode=archive", out, goPackageArg(m, ctx))
 
-	var cmd string
-	cmd = goBuildCmd(ldflags, "-buildmode=archive")
-	if envVar != "" {
-		cmd = envVar + " " + cmd
-	}
-
-	return fmt.Sprintf("build %s: go_build_archive %s\n flags = %s\n cmd = %s\n GOOS_GOARCH = %s\n",
-		out, strings.Join(srcs, " "), goflags, cmd, envVar)
+	return fmt.Sprintf("build %s: go_build_archive %s\n cmd = %s\n GOOS_GOARCH = %s\n",
+		out, strings.Join(goSourceInputs(srcs, ctx.PathPrefix), " "), cmd, envVar)
 }
 
 // Desc returns a short description of the build action for ninja's progress output.
@@ -272,25 +268,32 @@ type goBinary struct{}
 // Go binaries are standalone executables that can be run directly.
 func (r *goBinary) Name() string { return "go_binary" }
 
-// NinjaRule defines the ninja linking rule for Go binaries.
-// Uses "go build" without -buildmode to produce standalone executables.
-// Environment variables ${GOOS_GOARCH} control cross-compilation target.
+// NinjaRule defines the ninja rules for Go binaries.
+// Uses three rules:
+//  1. go_build_archive: Compile main package to .a (go build -buildmode=archive)
+//  2. go_write_importcfg: Write importcfg file with dep mappings
+//  3. go_link: Link all .a files using go tool link
 //
-// The rule uses env command to set GOOS/GOARCH environment variables:
-//   env ${GOOS_GOARCH} go build -o $out $in
+// Environment variables ${GOOS_GOARCH} control cross-compilation target.
 //
 // Parameters:
 //   - ctx: Rule render context (not used directly, but required by interface)
 //
 // Returns:
-//   - Ninja rule definition as formatted string
+//   - Ninja rule definitions as formatted string
 //
 // Edge cases:
-//   - This rule doesn't use toolchain context (always uses system Go toolchain)
+//   - These rules don't use toolchain context (always uses system Go toolchain)
 //   - GOOS_GOARCH variable is set per-variant in NinjaEdge
 func (r *goBinary) NinjaRule(ctx RuleRenderContext) string {
-	return `rule go_build
-  command = env ${GOOS_GOARCH} go build -o $out $in
+	return `rule go_build_archive
+  command = $cmd
+
+rule go_write_importcfg
+  command = $cmd
+
+rule go_link
+  command = $cmd
 
 `
 }
@@ -380,26 +383,26 @@ func (r *goBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	return edges.String()
 }
 
-// ninjaEdgeForVariant generates a build edge for a specific Go binary variant.
+// ninjaEdgeForVariant generates build edges for a specific Go binary variant.
 //
-// Dependencies are resolved by:
-//  1. Stripping ":" prefix from dep names (module reference syntax)
-//  2. Appending ".a" extension to get archive file names
-//  3. Adding as implicit dependencies (|) so ninja tracks them
-//  4. Using ctx.PathPrefix if set (for namespace support)
+// Uses the importcfg-based linking approach (per tasks.md):
+//  1. Compile main package to .a (go build -buildmode=archive)
+//  2. Generate importcfg file with all dependency mappings
+//  3. Link all .a files using go tool link
 //
-// Build edge format with deps:
+// Build edges generated:
 //
-//	{name}{suffix}: Depends on source files | lib1.a lib2.a ...
+//	{name}{suffix}.a: go_build_archive main_sources...
 //	  flags = goflags
-//	  cmd = [GOOS=X GOARCH=Y] go build [-ldflags "..."] -o $out $in
+//	  cmd = [GOOS=X GOARCH=Y] go build -buildmode=archive -o $out $in
 //	  GOOS_GOARCH = GOOS=X GOARCH=Y
 //
-// Build edge format without deps:
+//	importcfg_{name}{suffix}: generate_importcfg ...
+//	  Generates importcfg file with all dep -> .a mappings
 //
-//	{name}{suffix}: Depends on source files
+//	{name}{suffix}: go_link importcfg_{name}{suffix} || {name}{suffix}.a dep1.a dep2.a ...
 //	  flags = goflags
-//	  cmd = [GOOS=X GOARCH=Y] go build [-ldflags "..."] -o $out $in
+//	  cmd = [GOOS=X GOARCH=Y] go tool link -importcfg $in -buildmode=exe -o $out {name}{suffix}.a
 //	  GOOS_GOARCH = GOOS=X GOARCH=Y
 //
 // Parameters:
@@ -408,43 +411,48 @@ func (r *goBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 //
 // Edge cases:
 //   - Empty goos/goarch: No environment variables set, no suffix
-//   - Empty ldflags: Uses standard build command without -ldflags
+//   - Empty ldflags: Uses standard link command without -ldflags
 //   - Non-empty ldflags: Injects -ldflags using escapeLdflags
-//   - Empty deps: No implicit dependencies (no | separator)
+//   - Empty deps: Only main.a is linked
 func (r *goBinary) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext, goos, goarch string) string {
 	name := getName(m)
 	srcs := getSrcs(m)
-	deps := GetListProp(m, "deps")
-	goflags := getGoflags(m)
-	ldflags := getLdflags(m)
+	goflags := GetListProp(m, "goflags")
+	ldflags := GetListProp(m, "ldflags")
 
 	envVar, suffix, _, _ := goVariantEnvVars(goos, goarch)
 	out := name + suffix
+	mainArchive := out + ".a"
+	importcfgFile := "importcfg_" + out
+	depArchives := collectGoDependencyArchives(m, ctx, suffix)
 
-	var libFiles []string
-	for _, dep := range deps {
-		depName := strings.TrimPrefix(dep, ":")
-		libFiles = append(libFiles, ctx.PathPrefix+depName+suffix+".a")
+	// Edge 1: Compile main package to .a
+	var edges strings.Builder
+	edges.WriteString(fmt.Sprintf("build %s: go_build_archive %s\n cmd = %s\n GOOS_GOARCH = %s\n\n",
+		mainArchive,
+		strings.Join(goSourceInputs(srcs, ctx.PathPrefix), " "),
+		goBuildCmd(envVar, goflags, ldflags, "-buildmode=archive", mainArchive, goPackageArg(m, ctx)),
+		envVar))
+
+	// Edge 2: Generate importcfg file
+	edges.WriteString(fmt.Sprintf("build %s: go_write_importcfg %s\n cmd = %s\n\n",
+		importcfgFile,
+		strings.Join(goSourceInputs(srcs, ctx.PathPrefix), " "),
+		goImportcfgCmd(envVar, m, ctx, importcfgFile, mainArchive, depArchives)))
+
+	// Edge 3: Link using go tool link
+	depFiles := make([]string, 0, len(depArchives))
+	for _, dep := range depArchives {
+		depFiles = append(depFiles, dep.Archive)
 	}
-
-	srcStr := strings.Join(srcs, " ")
-
-	var cmd string
-	cmd = goBuildCmd(ldflags, "")
-	if envVar != "" {
-		cmd = envVar + " " + cmd
+	depClause := " | " + importcfgFile
+	if len(depFiles) > 0 {
+		depClause += " " + strings.Join(depFiles, " ")
 	}
+	edges.WriteString(fmt.Sprintf("build %s: go_link %s%s\n cmd = %s\n GOOS_GOARCH = %s\n",
+		out, mainArchive, depClause, goLinkCmd(envVar, ldflags, out, importcfgFile, mainArchive), envVar))
 
-	// Link dependencies as implicit inputs using | separator.
-	// This tells ninja to track dependencies but not to rebuild when they change.
-	if len(libFiles) > 0 {
-		libStr := strings.Join(libFiles, " ")
-		return fmt.Sprintf("build %s: go_build %s | %s\n flags = %s\n cmd = %s\n GOOS_GOARCH = %s\n",
-			out, srcStr, libStr, goflags, cmd, envVar)
-	}
-
-	return fmt.Sprintf("build %s: go_build %s\n flags = %s\n cmd = %s\n GOOS_GOARCH = %s\n",
-		out, srcStr, goflags, cmd, envVar)
+	return edges.String()
 }
 
 // Desc returns a short description of the build action for ninja's progress output.
@@ -494,7 +502,8 @@ func (r *goTest) Name() string { return "go_test" }
 // Environment variables ${GOOS_GOARCH} control cross-compilation target.
 //
 // The rule uses env command to set GOOS/GOARCH environment variables:
-//   env ${GOOS_GOARCH} go test -c -o $out $pkg
+//
+//	env ${GOOS_GOARCH} go test -c -o $out $pkg
 //
 // Note: Unlike go build, go test -c takes a package path ($pkg) not source files.
 //
@@ -509,7 +518,7 @@ func (r *goTest) Name() string { return "go_test" }
 //   - GOOS_GOARCH variable is set per-variant in NinjaEdge
 func (r *goTest) NinjaRule(ctx RuleRenderContext) string {
 	return `rule go_test
-  command = env ${GOOS_GOARCH} go test -c -o $out $pkg
+  command = $cmd
 
 `
 }
@@ -633,21 +642,15 @@ func (r *goTest) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 func (r *goTest) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext, goos, goarch string) string {
 	name := getName(m)
 	srcs := getSrcs(m)
-	goflags := getGoflags(m)
-	ldflags := getLdflags(m)
-	pkgPath := "./" + filepath.Dir(srcs[0])
+	goflags := GetListProp(m, "goflags")
+	ldflags := GetListProp(m, "ldflags")
 
 	envVar, suffix, _, _ := goVariantEnvVars(goos, goarch)
 	out := fmt.Sprintf("%s%s.test", name, suffix)
+	cmd := goTestCmd(envVar, goflags, ldflags, out, goPackageArg(m, ctx))
 
-	var cmd string
-	cmd = goTestCmd(ldflags)
-	if envVar != "" {
-		cmd = envVar + " " + cmd
-	}
-
-	return fmt.Sprintf("build %s: go_test\n pkg = %s\n flags = %s\n cmd = %s\n GOOS_GOARCH = %s\n",
-		out, pkgPath, goflags, cmd, envVar)
+	return fmt.Sprintf("build %s: go_test %s\n cmd = %s\n GOOS_GOARCH = %s\n",
+		out, strings.Join(goSourceInputs(srcs, ctx.PathPrefix), " "), cmd, envVar)
 }
 
 // Desc returns a short description of the build action for ninja's progress output.
@@ -689,54 +692,216 @@ func escapeLdflags(ldflags string) string {
 	return ldflags
 }
 
-// goBuildCmd constructs the go build command with optional build mode and linker flags.
-// It's used for building both libraries (-buildmode=archive) and binaries (no build mode).
-//
-// Parameters:
-//   - ldflags: Linker flags to inject via -ldflags (may be empty)
-//   - buildMode: Build mode flag (e.g., "-buildmode=archive" for libraries, "" for binaries)
-//
-// Returns:
-//   - The complete go build command string
-//
-// Edge cases:
-//   - Empty ldflags: Returns command without -ldflags
-//   - Empty buildMode: Returns "go build -o $out $in" (for binaries)
-//   - Non-empty ldflags: Escapes special characters via escapeLdflags
-//
-// Example outputs:
-//   - goBuildCmd("", "") -> "go build -o $out $in"
-//   - goBuildCmd("", "-buildmode=archive") -> "go build -buildmode=archive -o $out $in"
-//   - goBuildCmd("-s -w", "") -> "go build -ldflags \"-s -w\" -o $out $in"
-func goBuildCmd(ldflags string, buildMode string) string {
-	if ldflags != "" {
-		return fmt.Sprintf("go build %s -ldflags \"%s\" -o $out $in", buildMode, escapeLdflags(ldflags))
-	}
-	return fmt.Sprintf("go build %s -o $out $in", buildMode)
+type goDependencyArchive struct {
+	Name       string
+	ImportPath string
+	Archive    string
 }
 
-// goTestCmd constructs the go test command with optional linker flags.
-// It's used for compiling test executables with `go test -c`.
-//
-// Parameters:
-//   - ldflags: Linker flags to inject via -ldflags (may be empty)
-//
-// Returns:
-//   - The complete go test command string
-//
-// Edge cases:
-//   - Empty ldflags: Returns "go test -c -o $out $pkg" (standard test build)
-//   - Non-empty ldflags: Escapes special characters via escapeLdflags
-//
-// Example outputs:
-//   - goTestCmd("") -> "go test -c -o $out $pkg"
-//   - goTestCmd("-s -w") -> "go test -ldflags \"-s -w\" -c -o $out $pkg"
-func goTestCmd(ldflags string) string {
-	if ldflags != "" {
-		return fmt.Sprintf("go test -ldflags \"%s\" -c -o $out $pkg", escapeLdflags(ldflags))
+func goBuildCmd(envVar string, goflags, ldflags []string, buildMode, out, pkg string) string {
+	var parts []string
+	if envVar != "" {
+		parts = append(parts, "env", envVar)
 	}
-	return "go test -c -o $out $pkg"
+	parts = append(parts, "go", "build")
+	if joined := strings.Join(goflags, " "); joined != "" {
+		parts = append(parts, joined)
+	}
+	if buildMode != "" {
+		parts = append(parts, buildMode)
+	}
+	if joined := strings.Join(ldflags, " "); joined != "" {
+		parts = append(parts, "-ldflags", shellWord(joined))
+	}
+	parts = append(parts, "-o", shellWord(out), shellWord(pkg))
+	return strings.Join(parts, " ")
 }
+
+func goTestCmd(envVar string, goflags, ldflags []string, out, pkg string) string {
+	var parts []string
+	if envVar != "" {
+		parts = append(parts, "env", envVar)
+	}
+	parts = append(parts, "go", "test")
+	if joined := strings.Join(goflags, " "); joined != "" {
+		parts = append(parts, joined)
+	}
+	if joined := strings.Join(ldflags, " "); joined != "" {
+		parts = append(parts, "-ldflags", shellWord(joined))
+	}
+	parts = append(parts, "-c", "-o", shellWord(out), shellWord(pkg))
+	return strings.Join(parts, " ")
+}
+
+func goLinkCmd(envVar string, ldflags []string, out, importcfg, archive string) string {
+	var parts []string
+	if envVar != "" {
+		parts = append(parts, "env", envVar)
+	}
+	parts = append(parts, "go", "tool", "link", "-importcfg", shellWord(importcfg))
+	if joined := strings.Join(ldflags, " "); joined != "" {
+		parts = append(parts, joined)
+	}
+	parts = append(parts, "-buildmode=exe", "-o", shellWord(out), shellWord(archive))
+	return strings.Join(parts, " ")
+}
+
+func goImportcfgCmd(envVar string, m *parser.Module, ctx RuleRenderContext, out, mainArchive string, deps []goDependencyArchive) string {
+	pkg := goPackageArg(m, ctx)
+	template := "{{if .Export}}packagefile {{.ImportPath}}={{.Export}}{{end}}"
+	commands := []string{
+		fmt.Sprintf("%s > %s", goShellCmd(envVar, "go", "list", "-deps", "-f", template, pkg), shellWord(out)),
+	}
+	for _, dep := range deps {
+		commands = append(commands, fmt.Sprintf(
+			"printf '%%s\\n' %s >> %s",
+			shellWord(fmt.Sprintf("packagefile %s=%s", dep.ImportPath, dep.Archive)),
+			shellWord(out),
+		))
+	}
+	commands = append(commands, fmt.Sprintf(
+		"printf '%%s\\n' %s >> %s",
+		shellWord(fmt.Sprintf("packagefile %s=%s", goImportPath(m, ctx), mainArchive)),
+		shellWord(out),
+	))
+	return strings.Join(commands, " && ")
+}
+
+func goShellCmd(envVar string, args ...string) string {
+	parts := make([]string, 0, len(args)+1)
+	if envVar != "" {
+		parts = append(parts, "env", envVar)
+	}
+	for _, arg := range args {
+		if arg == "" {
+			continue
+		}
+		parts = append(parts, shellWord(arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+func shellWord(s string) string {
+	if s == "" {
+		return "''"
+	}
+	if strings.IndexFunc(s, func(r rune) bool {
+		switch r {
+		case ' ', '\t', '\n', '\r', '\'', '"', '$', '&', ';', '(', ')', '<', '>', '|', '*', '?', '[', ']', '{', '}', '!', '`':
+			return true
+		}
+		return false
+	}) == -1 {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
+}
+
+func goSourceInputs(srcs []string, pathPrefix string) []string {
+	inputs := make([]string, 0, len(srcs))
+	for _, src := range srcs {
+		inputs = append(inputs, filepath.ToSlash(filepath.Join(pathPrefix, src)))
+	}
+	return inputs
+}
+
+func goPackageArg(m *parser.Module, ctx RuleRenderContext) string {
+	pkg := getGoPackagePath(m)
+	pkg = filepath.ToSlash(filepath.Clean(filepath.Join(ctx.PathPrefix, pkg)))
+	if pkg == "" || pkg == "." {
+		return "."
+	}
+	if strings.HasPrefix(pkg, ".") || strings.HasPrefix(pkg, "/") {
+		return pkg
+	}
+	return "./" + pkg
+}
+
+func getGoPackagePath(m *parser.Module) string {
+	if pkg := strings.TrimSpace(GetStringProp(m, "pkg")); pkg != "" {
+		return filepath.ToSlash(filepath.Clean(pkg))
+	}
+	srcs := getSrcs(m)
+	if len(srcs) == 0 {
+		return "."
+	}
+	dir := filepath.Dir(srcs[0])
+	if dir == "" || dir == "." {
+		return "."
+	}
+	return filepath.ToSlash(filepath.Clean(dir))
+}
+
+func goImportPath(m *parser.Module, ctx RuleRenderContext) string {
+	if importPath := strings.TrimSpace(GetStringProp(m, "importpath")); importPath != "" {
+		return importPath
+	}
+
+	pkg := getGoPackagePath(m)
+	parts := make([]string, 0, 2)
+	if ctx.GoImportPrefix != "" {
+		parts = append(parts, strings.Trim(ctx.GoImportPrefix, "/"))
+	}
+	if pkg != "" && pkg != "." {
+		parts = append(parts, strings.Trim(pkg, "/"))
+	}
+	rel := strings.Join(parts, "/")
+	if ctx.GoModulePath != "" {
+		if rel == "" {
+			return ctx.GoModulePath
+		}
+		return strings.TrimRight(ctx.GoModulePath, "/") + "/" + rel
+	}
+	if rel != "" {
+		return rel
+	}
+	if pkg != "" && pkg != "." {
+		return pkg
+	}
+	return getName(m)
+}
+
+func collectGoDependencyArchives(m *parser.Module, ctx RuleRenderContext, suffix string) []goDependencyArchive {
+	if len(ctx.Modules) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	deps := make([]goDependencyArchive, 0)
+	var visit func(string)
+	visit = func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+
+		depModule := ctx.Modules[name]
+		if depModule == nil {
+			return
+		}
+		for _, dep := range GetListProp(depModule, "deps") {
+			visit(strings.TrimPrefix(dep, ":"))
+		}
+		if depModule.Type != "go_library" {
+			return
+		}
+		deps = append(deps, goDependencyArchive{
+			Name:       name,
+			ImportPath: goImportPath(depModule, ctx),
+			Archive:    name + suffix + ".a",
+		})
+	}
+
+	for _, dep := range GetListProp(m, "deps") {
+		visit(strings.TrimPrefix(dep, ":"))
+	}
+
+	sort.Slice(deps, func(i, j int) bool {
+		return deps[i].Name < deps[j].Name
+	})
+	return deps
+}
+
 // goosAndArch returns the GOOS and GOARCH values from context, with defaults from runtime.
 // It also returns whether this is a cross-compilation scenario.
 // If goos/goarch are different from runtime, they're considered cross-compilation.

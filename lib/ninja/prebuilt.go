@@ -35,9 +35,9 @@ package ninja
 import (
 	"fmt"
 	"minibp/lib/parser"
+	"minibp/lib/pathutil"
 	"path/filepath"
 	"strings"
-	"minibp/lib/pathutil"
 )
 
 func sanitizePathComponent(s string) string {

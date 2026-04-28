@@ -10,7 +10,7 @@ import (
 // TestModuleMarshalUnmarshal tests Module JSON serialization round-trip.
 func TestModuleMarshalUnmarshal(t *testing.T) {
 	original := &Module{
-		Type: "cc_library",
+		Type:    "cc_library",
 		TypePos: scanner.Position{Filename: "test.bp", Line: 1, Column: 1},
 		Map: &Map{
 			LBracePos: scanner.Position{Filename: "test.bp", Line: 1, Column: 12},

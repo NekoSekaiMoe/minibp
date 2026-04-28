@@ -13,9 +13,9 @@
 //   - java_import: Imports pre-built .jar files without recompilation
 //
 // Build process overview:
-//   1. javac compiles .java files to .class files in a staging directory ({name}_classes)
-//   2. jar packages the .class files into a .jar archive
-//   3. For executables, a manifest with Main-Class is created
+//  1. javac compiles .java files to .class files in a staging directory ({name}_classes)
+//  2. jar packages the .class files into a .jar archive
+//  3. For executables, a manifest with Main-Class is created
 //
 // Key design decisions:
 //   - Output naming: Uses "{name}.jar", "lib{name}.a.jar", "{name}-host.jar", "{name}-test.jar"
@@ -119,10 +119,10 @@ func (r *javaLibrary) Name() string { return "java_library" }
 // NinjaRule defines the ninja compilation and archiving rules for Java libraries.
 // Creates two rules:
 //   - javac_lib: Compiles Java sources to .class files in the specified outdir
-//     - Uses -d flag to specify output directory for .class files
+//   - Uses -d flag to specify output directory for .class files
 //   - jar_create: Packages .class files from outdir into a .jar archive
-//     - Uses -C flag to change to outdir before adding files
-//     - The "." adds all files from the outdir to the JAR
+//   - Uses -C flag to change to outdir before adding files
+//   - The "." adds all files from the outdir to the JAR
 //
 // Parameters:
 //   - ctx: Rule render context (not used directly, but required by interface)
@@ -260,12 +260,12 @@ func (r *javaBinary) Name() string {
 // NinjaRule defines the ninja compilation, packaging, and execution rules for Java binaries.
 // Creates three rules:
 //   - javac_bin: Compiles Java sources to .class files in the outdir
-//     - Uses -d flag to specify output directory for .class files
+//   - Uses -d flag to specify output directory for .class files
 //   - jar_create_executable: Packages .class files into executable JAR with manifest
-//     - Creates MANIFEST.MF with Manifest-Version, Main-Class, and Class-Path
-//     - Uses "jar cfm" to create JAR with manifest file
-//     - Main-Class specifies the entry point for java -jar command
-//     - Class-Path specifies runtime dependencies (for java -jar classpath)
+//   - Creates MANIFEST.MF with Manifest-Version, Main-Class, and Class-Path
+//   - Uses "jar cfm" to create JAR with manifest file
+//   - Main-Class specifies the entry point for java -jar command
+//   - Class-Path specifies runtime dependencies (for java -jar classpath)
 //
 // Parameters:
 //   - ctx: Rule render context (not used directly, but required by interface)
@@ -407,9 +407,9 @@ func (r *javaLibraryStatic) Name() string {
 //
 // Creates two rules:
 //   - javac_lib: Compiles Java sources to .class files in the outdir
-//     - Uses -d flag to specify output directory
+//   - Uses -d flag to specify output directory
 //   - jar_create: Packages .class files into a .jar archive
-//     - Uses -C flag to change to outdir before adding files
+//   - Uses -C flag to change to outdir before adding files
 //
 // Parameters:
 //   - ctx: Rule render context (not used directly, but required by interface)
@@ -556,9 +556,9 @@ func (r *javaLibraryHost) Name() string { return "java_library_host" }
 //
 // Creates two rules:
 //   - javac_lib: Compiles Java sources to .class files in the outdir
-//     - Uses -d flag to specify output directory
+//   - Uses -d flag to specify output directory
 //   - jar_create: Packages .class files into a .jar archive
-//     - Uses -C flag to change to outdir before adding files
+//   - Uses -C flag to change to outdir before adding files
 //
 // Parameters:
 //   - ctx: Rule render context (not used directly, but required by interface)
@@ -697,10 +697,10 @@ func (r *javaBinaryHost) Name() string { return "java_binary_host" }
 //
 // Creates two rules:
 //   - javac_bin: Compiles Java sources to .class files in the outdir
-//     - Uses -d flag to specify output directory
+//   - Uses -d flag to specify output directory
 //   - jar_create_executable: Creates executable JAR with main class
-//     - Uses "jar cfe" to set entry point directly (simpler than manifest)
-//     - -C flag changes to outdir before adding files
+//   - Uses "jar cfe" to set entry point directly (simpler than manifest)
+//   - -C flag changes to outdir before adding files
 //
 // Parameters:
 //   - ctx: Rule render context (not used directly, but required by interface)
@@ -828,9 +828,9 @@ func (r *javaTest) Name() string { return "java_test" }
 // NinjaRule defines the ninja compilation and test JAR creation rules.
 // Creates two rules:
 //   - javac_test: Compiles test sources with test-specific flags
-//     - Uses -d flag to specify output directory
+//   - Uses -d flag to specify output directory
 //   - jar_test: Packages test .class files into a test JAR
-//     - Uses -C flag to change to outdir before adding files
+//   - Uses -C flag to change to outdir before adding files
 //
 // Test JARs are typically executed by test runners like JUnit.
 //
@@ -1025,7 +1025,7 @@ func (r *javaImport) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 //
 // Build edges generated:
 //   - {name}.jar: Depends on source JAR(s), copies to output location
-//     - Uses java_import rule which invokes cp or cmd /c copy
+//   - Uses java_import rule which invokes cp or cmd /c copy
 //
 // Parameters:
 //   - m: Module being evaluated (must have "srcs" property with prebuilt JAR paths)

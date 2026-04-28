@@ -17,7 +17,8 @@ import (
 // merged BuildJSON (from multiple .bp files) into a complete build.ninja.
 //
 // It implements the final conversion step of the incremental pipeline described in tasks.md:
-//   Input -> parse -> .bp.json -> collect -> build.json -> convert -> build.ninja
+//
+//	Input -> parse -> .bp.json -> collect -> build.json -> convert -> build.ninja
 //
 // The function orchestrates the following steps (matching tasks.md flow):
 //  1. collectAllDefs: Extracts all definitions (modules, assignments, namespaces) from all BuildJSON sources

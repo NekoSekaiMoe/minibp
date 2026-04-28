@@ -171,7 +171,6 @@ func ExpandGlobs(modules map[string]*parser.Module, baseDir string) error {
 	return nil
 }
 
-
 // expandGlob expands a single glob pattern into a list of matching file paths.
 // It handles two types of patterns:
 //   - Simple globs (* and ?) which are expanded using filepath.Glob.

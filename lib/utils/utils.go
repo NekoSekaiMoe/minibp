@@ -21,6 +21,7 @@ import (
 
 // BuildOptions is a local alias for build.Options to avoid import cycles.
 type BuildOptions = build.Options
+
 // RunConfig holds the command-line configuration for a minibp execution.
 // It encapsulates all flag values and derived settings needed to parse
 // Blueprint files and generate Ninja build rules.
@@ -206,13 +207,13 @@ func ParseRunConfig(args []string, stderr io.Writer) (RunConfig, error) {
 // during Blueprint parsing, not by the build pipeline.
 func NewEvaluatorFromConfig(cfg RunConfig) *parser.Evaluator {
 	eval := parser.NewEvaluator()
-	
+
 	// Default to current system architecture (host build)
 	arch := runtime.GOARCH
 	if cfg.Arch != "" {
 		arch = cfg.Arch
 	}
-	
+
 	eval.SetConfig("arch", arch)
 	eval.SetConfig("host", "true")
 	if cfg.TargetOS != "" {

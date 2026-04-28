@@ -14,17 +14,18 @@
 //  5. Finally save updated dependency hashes (SaveDepFile)
 //
 // Example:
-//  mgr, err := incremental.NewManager("/path/to/project")
-//  if err != nil { return err }
-//  needsReparse, _ := mgr.NeedsReparse("foo.bp")
-//  if needsReparse {
-//      // Parse file and cache
-//      mgr.SaveJSON("foo.bp", parsedFile)
-//  } else {
-//      // Load from cache
-//      cached, _ := mgr.LoadJSON("foo.bp")
-//  }
-//  mgr.SaveDepFile()
+//
+//	mgr, err := incremental.NewManager("/path/to/project")
+//	if err != nil { return err }
+//	needsReparse, _ := mgr.NeedsReparse("foo.bp")
+//	if needsReparse {
+//	    // Parse file and cache
+//	    mgr.SaveJSON("foo.bp", parsedFile)
+//	} else {
+//	    // Load from cache
+//	    cached, _ := mgr.LoadJSON("foo.bp")
+//	}
+//	mgr.SaveDepFile()
 package incremental
 
 import (
@@ -58,7 +59,7 @@ import (
 //   - Version: Dependency file format version, currently 1
 //   - Hashes: Map from .bp file path to its SHA256 hash value
 type DepFile struct {
-	Version int                `json:"version"`
+	Version int               `json:"version"`
 	Hashes  map[string]string `json:"hashes"` // bpFilePath -> sha256hex
 }
 
@@ -75,10 +76,10 @@ type DepFile struct {
 //   - Provide methods to save and load JSON cache
 //
 // Workflow:
-//   1. Create necessary directories on initialization (.minibp/ and .minibp/json/)
-//   2. Attempt to load existing dep.json file to restore previous hash records
-//   3. Check each file for reparsing needs during build process
-//   4. Save updated dependency information after build completes
+//  1. Create necessary directories on initialization (.minibp/ and .minibp/json/)
+//  2. Attempt to load existing dep.json file to restore previous hash records
+//  3. Check each file for reparsing needs during build process
+//  4. Save updated dependency information after build completes
 type Manager struct {
 	workDir string            // project root (where .minibp lives)
 	jsonDir string            // .minibp/json/
@@ -149,9 +150,9 @@ func NewManager(workDir string) (*Manager, error) {
 //
 // Returns:
 //   - error: Returns error if file read fails or JSON parsing fails
-//     - File not found: Returns os.PathError
-//     - Invalid JSON format: Returns json.UnmarshalError
-//     - Success: Returns nil
+//   - File not found: Returns os.PathError
+//   - Invalid JSON format: Returns json.UnmarshalError
+//   - Success: Returns nil
 //
 // Edge cases:
 //   - If dep.json exists but Hashes field is null, initializes to empty map
@@ -196,9 +197,9 @@ func (m *Manager) loadDepFile() error {
 //
 // Returns:
 //   - error: Returns error if JSON serialization fails or file write fails
-//     - Serialization failure: Returns json.MarshalError
-//     - Write failure: Returns os.PathError or permission error
-//     - Success: Returns nil
+//   - Serialization failure: Returns json.MarshalError
+//   - Write failure: Returns os.PathError or permission error
+//   - Success: Returns nil
 //
 // Edge cases:
 //   - If m.hashes is empty map, still writes a valid JSON file (hashes as empty object)
@@ -240,9 +241,9 @@ func (m *Manager) SaveDepFile() error {
 // Returns:
 //   - string: SHA256 hash of file content (hex lowercase string)
 //   - error: Returns error if file open or read fails
-//     - File not found: Returns os.PathError
-//     - Read failure: Returns io.ReadError
-//     - Success: Returns nil
+//   - File not found: Returns os.PathError
+//   - Read failure: Returns io.ReadError
+//   - Success: Returns nil
 //
 // Edge cases:
 //   - Empty file hash: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
@@ -440,9 +441,9 @@ func sanitizeName(name string) string {
 //
 // Returns:
 //   - error: Returns error if JSON serialization fails or file write fails
-//     - Serialization failure: Returns json.MarshalError
-//     - Write failure: Returns os.PathError or permission error
-//     - Success: Returns nil
+//   - Serialization failure: Returns json.MarshalError
+//   - Write failure: Returns os.PathError or permission error
+//   - Success: Returns nil
 //
 // Edge cases:
 //   - If target directory doesn't exist, returns error (should be created in NewManager)
@@ -539,9 +540,9 @@ func (m *Manager) LoadJSON(bpFile string) (*parser.File, error) {
 //
 // Returns:
 //   - error: Returns error if file hash computation fails
-//     - File not found: Returns os.PathError
-//     - Read failure: Returns io.ReadError
-//     - Success: Returns nil
+//   - File not found: Returns os.PathError
+//   - Read failure: Returns io.ReadError
+//   - Success: Returns nil
 //
 // Edge cases:
 //   - If file is first seen, adds to hash table

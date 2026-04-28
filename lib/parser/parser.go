@@ -14,17 +14,19 @@
 //   - Property overrides: arch: {...}, host: {...}, target: {...}, multilib: {...}
 //
 // Grammar overview:
-//   File        -> Definition*
-//   Definition  -> Module | Assignment
-//   Module      -> IDENT LBRACE PropertyList RBRACE
-//   Assignment  -> IDENT (ASSIGN | PLUSEQ) Expression
-//   Expression  -> Primary (PLUS Primary)*
-//   Primary     -> STRING | INT | BOOL | LIST | MAP | IDENT | select()
+//
+//	File        -> Definition*
+//	Definition  -> Module | Assignment
+//	Module      -> IDENT LBRACE PropertyList RBRACE
+//	Assignment  -> IDENT (ASSIGN | PLUSEQ) Expression
+//	Expression  -> Primary (PLUS Primary)*
+//	Primary     -> STRING | INT | BOOL | LIST | MAP | IDENT | select()
 //
 // Error handling:
-//   Parse errors are collected and aggregated rather than failing immediately.
-//   This allows users to fix multiple issues in a single pass.
-//   The parser uses error recovery to skip to the next definition after an error.
+//
+//	Parse errors are collected and aggregated rather than failing immediately.
+//	This allows users to fix multiple issues in a single pass.
+//	The parser uses error recovery to skip to the next definition after an error.
 //
 // The parser is the second stage in the Blueprint pipeline, consuming tokens
 // from the lexer and producing AST nodes that represent the syntactic structure
@@ -69,9 +71,9 @@ type Parser struct {
 	lexer     *Lexer  // The lexer used to tokenize the input
 	curToken  Token   // The current token being processed
 	peekToken Token   // The next token (lookahead) for grammar look-ahead
-	fileName string  // Name of the file being parsed (for error reporting)
-	source   string // Source content for error line display
-	errors   []error // List of parsing errors encountered
+	fileName  string  // Name of the file being parsed (for error reporting)
+	source    string  // Source content for error line display
+	errors    []error // List of parsing errors encountered
 }
 
 // NewParser creates a new Parser from an io.Reader.
@@ -84,9 +86,9 @@ type Parser struct {
 // whether the next token is LBRACE (module) or ASSIGN (assignment).
 //
 // Setup process:
-//   1. Create lexer with the input reader and filename
-//   2. Call nextToken() twice to fill curToken and peekToken
-//   3. Parser is now ready to parse
+//  1. Create lexer with the input reader and filename
+//  2. Call nextToken() twice to fill curToken and peekToken
+//  3. Parser is now ready to parse
 //
 // Parameters:
 //   - r: The input io.Reader containing Blueprint source code
@@ -102,8 +104,8 @@ func NewParser(r io.Reader, fileName string, source ...string) *Parser {
 	p := &Parser{
 		lexer:    NewLexer(r, fileName),
 		fileName: fileName,
-		source:  src,
-		errors:  []error{},
+		source:   src,
+		errors:   []error{},
 	}
 	// Initialize curToken and peekToken by advancing twice
 	// This sets up the initial state for the recursive descent parser
@@ -122,8 +124,9 @@ func NewParser(r io.Reader, fileName string, source ...string) *Parser {
 // the next token available for inspection via peekToken.
 //
 // Token flow:
-//   Before: curToken=A, peekToken=B, lexer.position=C
-//   After:  curToken=B, peekToken=C, lexer.position=D
+//
+//	Before: curToken=A, peekToken=B, lexer.position=C
+//	After:  curToken=B, peekToken=C, lexer.position=D
 func (p *Parser) nextToken() {
 	p.curToken = p.peekToken
 	p.peekToken = p.lexer.NextToken()
@@ -154,7 +157,7 @@ func (p *Parser) expect(t TokenType) (Token, error) {
 		return tok, nil
 	}
 	err := errors.Syntax(fmt.Sprintf("expected %s, got %s", t, p.curToken.Type)).
-			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column)
+		WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column)
 	return Token{}, err
 }
 
@@ -186,10 +189,10 @@ func (p *Parser) expectPeek(t TokenType) bool {
 // all issues are reported to the caller.
 //
 // Parse flow:
-//   1. Create an empty File node with the filename
-//   2. Loop: parseDefinition() until EOF token
-//   3. Collect errors from parser and lexer
-//   4. Return File and errors
+//  1. Create an empty File node with the filename
+//  2. Loop: parseDefinition() until EOF token
+//  3. Collect errors from parser and lexer
+//  4. Return File and errors
 //
 // Error handling:
 //   - Parse errors are collected rather than failing immediately
@@ -234,9 +237,10 @@ func (p *Parser) Parse() (*File, []error) {
 // recover from syntax errors and continue processing the rest of the file.
 //
 // Example error recovery:
-//   my_module { srcs: ["file.c", }
-//            ^ parse error here
-//   another_module { }  <- skipToNextDefinition skips to here
+//
+//	my_module { srcs: ["file.c", }
+//	         ^ parse error here
+//	another_module { }  <- skipToNextDefinition skips to here
 func (p *Parser) skipToNextDefinition() {
 	for p.curToken.Type != EOF && p.curToken.Type != IDENT {
 		p.nextToken()
@@ -250,13 +254,14 @@ func (p *Parser) skipToNextDefinition() {
 //   - If followed by ASSIGN (=) or PLUSEQ (+=), it's an assignment
 //
 // Grammar:
-//   Definition -> IDENT (LBRACE Module | (ASSIGN | PLUSEQ) Assignment)
+//
+//	Definition -> IDENT (LBRACE Module | (ASSIGN | PLUSEQ) Assignment)
 //
 // Token flow:
-//   1. Verify current token is IDENT
-//   2. Record name and position
-//   3. Advance to next token
-//   4. Check token to decide definition type
+//  1. Verify current token is IDENT
+//  2. Record name and position
+//  3. Advance to next token
+//  4. Check token to decide definition type
 //
 // Returns:
 //   - Definition: A Module or Assignment AST node
@@ -349,38 +354,38 @@ func (p *Parser) parseModule(typeName string, typePos scanner.Position) (*Module
 		case "host":
 			// Host-specific overrides: host: { ... }
 			m, ok := prop.Value.(*Map)
-		if !ok {
-			return nil, errors.Syntax("expected map value for 'host' override").
-				WithLocation(p.fileName, prop.ColonPos.Line, prop.ColonPos.Column).
-				WithSuggestion("host: requires map value like host: { ... }")
-		}
-		hostProps = m
-	case "target":
-		// Target-specific overrides: target: { ... }
-		m, ok := prop.Value.(*Map)
-		if !ok {
-			return nil, errors.Syntax("expected map value for 'target' override").
-				WithLocation(p.fileName, prop.ColonPos.Line, prop.ColonPos.Column).
-				WithSuggestion("target: requires map value like target: { ... }")
-		}
-		targetProps = m
-	case "multilib":
-		// Multilib overrides: multilib: { lib32: {...}, lib64: {...} }
-		mlMap, ok := prop.Value.(*Map)
-		if !ok {
-			return nil, errors.Syntax("expected map value for 'multilib' override").
-				WithLocation(p.fileName, prop.ColonPos.Line, prop.ColonPos.Column).
-				WithSuggestion("multilib: requires map value like multilib: { lib32: {...} }")
-		}
-		for _, mp := range mlMap.Properties {
-			mlInner, ok := mp.Value.(*Map)
 			if !ok {
-				return nil, errors.Syntax(fmt.Sprintf("expected map value for multilib override '%s'", mp.Name)).
-					WithLocation(p.fileName, mp.ColonPos.Line, mp.ColonPos.Column).
-					WithSuggestion("Multilib variant requires map value")
+				return nil, errors.Syntax("expected map value for 'host' override").
+					WithLocation(p.fileName, prop.ColonPos.Line, prop.ColonPos.Column).
+					WithSuggestion("host: requires map value like host: { ... }")
 			}
-			multilibProps[mp.Name] = mlInner
-		}
+			hostProps = m
+		case "target":
+			// Target-specific overrides: target: { ... }
+			m, ok := prop.Value.(*Map)
+			if !ok {
+				return nil, errors.Syntax("expected map value for 'target' override").
+					WithLocation(p.fileName, prop.ColonPos.Line, prop.ColonPos.Column).
+					WithSuggestion("target: requires map value like target: { ... }")
+			}
+			targetProps = m
+		case "multilib":
+			// Multilib overrides: multilib: { lib32: {...}, lib64: {...} }
+			mlMap, ok := prop.Value.(*Map)
+			if !ok {
+				return nil, errors.Syntax("expected map value for 'multilib' override").
+					WithLocation(p.fileName, prop.ColonPos.Line, prop.ColonPos.Column).
+					WithSuggestion("multilib: requires map value like multilib: { lib32: {...} }")
+			}
+			for _, mp := range mlMap.Properties {
+				mlInner, ok := mp.Value.(*Map)
+				if !ok {
+					return nil, errors.Syntax(fmt.Sprintf("expected map value for multilib override '%s'", mp.Name)).
+						WithLocation(p.fileName, mp.ColonPos.Line, mp.ColonPos.Column).
+						WithSuggestion("Multilib variant requires map value")
+				}
+				multilibProps[mp.Name] = mlInner
+			}
 		case "override":
 			// Override flag: override: true
 			if b, ok := prop.Value.(*Bool); ok {
@@ -831,11 +836,12 @@ func (p *Parser) parseMap() (*Map, error) {
 // - Any @var binding: Binds the matched value to a variable for use in the result
 //
 // Example usage:
-//   srcs: select(arch(), {
-//       arm: ["arm.c"],
-//       arm64: ["arm64.c"],
-//       default: ["common.c"],
-//   })
+//
+//	srcs: select(arch(), {
+//	    arm: ["arm.c"],
+//	    arm64: ["arm64.c"],
+//	    default: ["common.c"],
+//	})
 //
 // Parameters:
 //   - None (uses parser state)
@@ -871,13 +877,13 @@ func (p *Parser) parseSelect() (*Select, error) {
 				p.nextToken()
 			}
 		}
-if p.curToken.Type != RPAREN {
-		return nil, errors.Syntax("expected ')' after tuple conditions").
-			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
-			WithSuggestion("Tuple conditions must be closed with ')'")
-	}
-	p.nextToken()
-} else {
+		if p.curToken.Type != RPAREN {
+			return nil, errors.Syntax("expected ')' after tuple conditions").
+				WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+				WithSuggestion("Tuple conditions must be closed with ')'")
+		}
+		p.nextToken()
+	} else {
 		// Single condition
 		cond, err := p.parseConfigurableCondition()
 		if err != nil {
@@ -1183,6 +1189,13 @@ func (p *Parser) parseSelectPattern() (SelectPattern, error) {
 //   - *File: The parsed AST
 //   - error: nil if successful, otherwise the first error encountered
 func ParseFile(r io.Reader, fileName string, source ...string) (*File, error) {
+	if r == nil {
+		if len(source) > 0 {
+			r = strings.NewReader(source[0])
+		} else {
+			return nil, fmt.Errorf("ParseFile: reader is nil and no source provided for %s", fileName)
+		}
+	}
 	parser := NewParser(r, fileName, source...)
 	file, errors := parser.Parse()
 	if len(errors) > 0 {

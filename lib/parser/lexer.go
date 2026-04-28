@@ -37,9 +37,9 @@ import (
 //   - Special: EOF (end of file), ILLEGAL (unrecognized character)
 //   - Literals: IDENT (variable/module names), STRING (quoted text), INT (numbers), BOOL (true/false)
 //   - Grouping: LPAREN/RPAREN (function calls, grouping), LBRACE/RBRACE (modules, maps),
-//             LBRACKET/RBRACKET (lists)
+//     LBRACKET/RBRACKET (lists)
 //   - Operators: COLON (property separator), COMMA (separator), PLUS (concatenation),
-//             ASSIGN simple assignment (=), PLUSEQ (+=), UNSET (unset keyword), AT (@ binding)
+//     ASSIGN simple assignment (=), PLUSEQ (+=), UNSET (unset keyword), AT (@ binding)
 //
 // These token types are the fundamental building blocks that the parser uses to
 // understand the syntactic structure of Blueprint source files. The lexer converts
@@ -66,13 +66,13 @@ const (
 	RBRACKET // ]  Right bracket
 
 	// Operators and separators
-	COLON    // :  Colon - property separator in maps
-	COMMA    // ,  Comma - list/element separator
-	PLUS     // +  Plus - concatenation operator
-	ASSIGN   // =  Equals - simple assignment operator
-	PLUSEQ   // += Plus-equals - concatenation assignment operator
-	UNSET    // unset keyword - for removing property values in select
-	AT       // @  At sign - for any @ var binding in select patterns
+	COLON  // :  Colon - property separator in maps
+	COMMA  // ,  Comma - list/element separator
+	PLUS   // +  Plus - concatenation operator
+	ASSIGN // =  Equals - simple assignment operator
+	PLUSEQ // += Plus-equals - concatenation assignment operator
+	UNSET  // unset keyword - for removing property values in select
+	AT     // @  At sign - for any @ var binding in select patterns
 )
 
 // Token represents a lexical token with its type, literal value, and source position.
@@ -151,10 +151,11 @@ type Lexer struct {
 //   - A new Lexer instance ready to produce tokens
 //
 // Example usage:
-//   lexer := NewLexer(strings.NewReader("cc_library { srcs: [\"*.c\"] }"), "Android.bp")
-//   for tok := lexer.NextToken(); tok.Type != EOF; tok = lexer.NextToken() {
-//       // Process token...
-//   }
+//
+//	lexer := NewLexer(strings.NewReader("cc_library { srcs: [\"*.c\"] }"), "Android.bp")
+//	for tok := lexer.NextToken(); tok.Type != EOF; tok = lexer.NextToken() {
+//	    // Process token...
+//	}
 func NewLexer(r io.Reader, fileName string) *Lexer {
 	l := &Lexer{}
 	l.scanner.Init(r)
@@ -193,12 +194,12 @@ func (l *Lexer) peek() rune {
 // The lexer automatically skips comments and whitespace.
 //
 // Token processing flow:
-//   1. Record the current source position for the token
-//   2. Switch on the current character to determine token type
-//   3. For identifiers, further classify as keyword or regular identifier
-//   4. For multi-character tokens (=, +=), peek at the next character
-//   5. Advance to the next character
-//   6. Return the complete token
+//  1. Record the current source position for the token
+//  2. Switch on the current character to determine token type
+//  3. For identifiers, further classify as keyword or regular identifier
+//  4. For multi-character tokens (=, +=), peek at the next character
+//  5. Advance to the next character
+//  6. Return the complete token
 //
 // Special handling:
 //   - '+' followed by '=': Returns PLUSEQ token, advances past both
@@ -383,8 +384,9 @@ func (l *Lexer) Errors() []error {
 //     unterminated string, invalid unicode surrogate)
 //
 // Example:
-//   Unquote(`"hello\nworld"`) -> "hello\nworld", nil
-//   Unquote("'unterminated") -> "", error
+//
+//	Unquote(`"hello\nworld"`) -> "hello\nworld", nil
+//	Unquote("'unterminated") -> "", error
 func Unquote(s string) (string, error) {
 	return strconv.Unquote(s)
 }

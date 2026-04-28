@@ -27,6 +27,7 @@
 // The graph maintains two edge representations:
 //   - edges: forward mapping (module -> its dependencies)
 //   - reverseEdges: reverse mapping (dependency -> modules that depend on it)
+//
 // This bidirectional structure enables efficient queries in both directions.
 package dependency
 
@@ -38,7 +39,7 @@ import (
 
 // Dependency represents a module dependency with name, version, and optional status.
 // A Dependency captures the relationship between a module and another module it depends on.
-// 
+//
 // Dependencies are declared in module properties like "srcs", "deps", and "lib_deps".
 // The build system resolves these declarations into complete dependency graphs
 // for determining build order and detecting conflicts.
@@ -63,6 +64,7 @@ type Dependency struct {
 // The graph uses two edge representations:
 //   - edges: forward mapping (module -> its dependencies) for dependency resolution
 //   - reverseEdges: reverse mapping (dependency -> modules that depend on it) for dependent lookup
+//
 // This bidirectional structure supports efficient queries in both directions.
 //
 // The graph must be populated using AddModule before performing any

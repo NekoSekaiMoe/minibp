@@ -11,14 +11,15 @@
 // (git metadata, build date) and runtime-detected values (Go version, compiler, platform).
 //
 // Typical build command with version injection:
-//   go build -ldflags=" \
-//     -X 'minibp/lib/version.gitTag=$(git describe --tags --abbrev=0)' \
-//     -X 'minibp/lib/version.gitBranch=$(git branch --show-current)' \
-//     -X 'minibp/lib/version.gitCommit=$(git rev-parse HEAD)' \
-//     -X 'minibp/lib/version.gitTreeState=$(test -z "$(git status --porcelain)" && echo clean || echo dirty)' \
-//     -X 'minibp/lib/version.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)' \
-//     -X 'minibp/lib/version.minibpVer=0.001'" \
-//     -o minibp cmd/minibp/main.go
+//
+//	go build -ldflags=" \
+//	  -X 'minibp/lib/version.gitTag=$(git describe --tags --abbrev=0)' \
+//	  -X 'minibp/lib/version.gitBranch=$(git branch --show-current)' \
+//	  -X 'minibp/lib/version.gitCommit=$(git rev-parse HEAD)' \
+//	  -X 'minibp/lib/version.gitTreeState=$(test -z "$(git status --porcelain)" && echo clean || echo dirty)' \
+//	  -X 'minibp/lib/version.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)' \
+//	  -X 'minibp/lib/version.minibpVer=0.001'" \
+//	  -o minibp cmd/minibp/main.go
 package version
 
 import (
@@ -34,8 +35,9 @@ import (
 // injection values default to "unknown" rather than empty strings.
 //
 // JSON serialization example:
-//   data, _ := json.Marshal(version.Get())
-//   fmt.Println(string(data))
+//
+//	data, _ := json.Marshal(version.Get())
+//	fmt.Println(string(data))
 //
 // Fields are grouped by source:
 //   - Build-time: GitTag, GitBranch, GitCommit, GitTreeState, BuildDate, MinibpVer
@@ -165,11 +167,12 @@ func Get() Info {
 // though version reporting will show "unknown" for missing fields.
 //
 // Example ldflags injection:
-//   -X 'minibp/lib/version.gitTag=v1.0.0'
-//   -X 'minibp/lib/version.gitCommit=$(git rev-parse HEAD)'
-//   -X 'minibp/lib/version.gitTreeState=$(test -z "$(git status --porcelain)" && echo clean || echo dirty)'
-//   -X 'minibp/lib/version.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)'
-//   -X 'minibp/lib/version.minibpVer=0.001'
+//
+//	-X 'minibp/lib/version.gitTag=v1.0.0'
+//	-X 'minibp/lib/version.gitCommit=$(git rev-parse HEAD)'
+//	-X 'minibp/lib/version.gitTreeState=$(test -z "$(git status --porcelain)" && echo clean || echo dirty)'
+//	-X 'minibp/lib/version.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)'
+//	-X 'minibp/lib/version.minibpVer=0.001'
 var (
 	// gitTag is the Git tag from the most recent commit.
 	// Set by: git describe --tags --abbrev=0

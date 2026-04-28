@@ -78,14 +78,14 @@ type Generator struct {
 	sourceDir  string
 	outputDir  string
 	pathPrefix string
-	regenCmd   string                    // Command to regenerate build.ninja
-	inputFiles []string                  // Files that trigger regeneration
-	outputFile string                    // Output file for regeneration rule
-	workDir    string                    // Working directory for custom rules
-	toolchain  Toolchain                 // Compiler toolchain configuration
-	arch       string                    // Target architecture
-	multilib   []string                  // Multi-arch targets (e.g. ["arm64","x86_64"])
-	targetOS  string                    // Target operating system (e.g., "linux", "darwin", "windows")
+	regenCmd   string    // Command to regenerate build.ninja
+	inputFiles []string  // Files that trigger regeneration
+	outputFile string    // Output file for regeneration rule
+	workDir    string    // Working directory for custom rules
+	toolchain  Toolchain // Compiler toolchain configuration
+	arch       string    // Target architecture
+	multilib   []string  // Multi-arch targets (e.g. ["arm64","x86_64"])
+	targetOS   string    // Target operating system (e.g., "linux", "darwin", "windows")
 }
 
 // Toolchain holds compiler/tool configuration for cross-compilation.
@@ -121,8 +121,9 @@ type Toolchain struct {
 //   - Generator with default settings (sourceDir=".", outputDir=".")
 //
 // Note:
-//   The generator is configured with default directories and must have SetSourceDir
-//   and SetOutputDir called before generating if non-default paths are needed.
+//
+//	The generator is configured with default directories and must have SetSourceDir
+//	and SetOutputDir called before generating if non-default paths are needed.
 func NewGenerator(g Graph, rules map[string]BuildRule, modules map[string]*parser.Module) *Generator {
 	return &Generator{
 		graph:     g,
@@ -804,7 +805,53 @@ func (g *Generator) ruleRenderContextForArch(arch string) RuleRenderContext {
 		ctx.GOARCH = g.arch
 	}
 	ctx.PathPrefix = g.pathPrefix
+	ctx.Modules = g.modules
+	ctx.GoModulePath, ctx.GoImportPrefix = detectGoModuleContext(g.sourceDir)
 	return ctx
+}
+
+func detectGoModuleContext(sourceDir string) (modulePath string, importPrefix string) {
+	absSourceDir, err := filepath.Abs(sourceDir)
+	if err != nil {
+		return "", ""
+	}
+
+	dir := absSourceDir
+	for {
+		goModPath := filepath.Join(dir, "go.mod")
+		data, err := os.ReadFile(goModPath)
+		if err == nil {
+			modulePath = parseGoModulePath(string(data))
+			if modulePath == "" {
+				return "", ""
+			}
+			rel, err := filepath.Rel(dir, absSourceDir)
+			if err != nil || rel == "." {
+				return modulePath, ""
+			}
+			return modulePath, filepath.ToSlash(rel)
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", ""
+		}
+		dir = parent
+	}
+}
+
+func parseGoModulePath(goMod string) string {
+	for _, line := range strings.Split(goMod, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "//") {
+			continue
+		}
+		if !strings.HasPrefix(line, "module ") {
+			continue
+		}
+		return strings.TrimSpace(strings.TrimPrefix(line, "module "))
+	}
+	return ""
 }
 
 // shellQuote wraps a command-line argument in double quotes,

@@ -15,9 +15,9 @@
 //   - Map merging: map properties recursively merge
 //
 // Evaluation flow:
-//   1. ProcessAssignments: Evaluate all variable assignments in order
-//   2. Eval: Evaluate any expression AST node to its Go value
-//   3. evalSelect: Handle architecture/platform-specific values
+//  1. ProcessAssignments: Evaluate all variable assignments in order
+//  2. Eval: Evaluate any expression AST node to its Go value
+//  3. evalSelect: Handle architecture/platform-specific values
 //
 // Error handling:
 //   - Undefined variables return nil

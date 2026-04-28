@@ -574,6 +574,139 @@ func TestGeneratorEnvIsolationAcrossInstances(t *testing.T) {
 	}
 }
 
+func TestGoLibraryUsesPackageDirAndPrefixedInputs(t *testing.T) {
+	r := &goLibrary{}
+	m := &parser.Module{
+		Type: "go_library",
+		Map: &parser.Map{Properties: []*parser.Property{
+			{Name: "name", Value: &parser.String{Value: "libapi"}},
+			{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+				&parser.String{Value: "src/api/api.go"},
+				&parser.String{Value: "src/api/types.go"},
+			}}},
+			{Name: "goflags", Value: &parser.List{Values: []parser.Expression{
+				&parser.String{Value: "-trimpath"},
+			}}},
+		}},
+	}
+
+	ctx := DefaultRuleRenderContext()
+	ctx.PathPrefix = "../examples/"
+
+	edge := r.NinjaEdge(m, ctx)
+	if !strings.Contains(edge, "build libapi.a: go_build_archive ../examples/src/api/api.go ../examples/src/api/types.go") {
+		t.Fatalf("Expected prefixed source inputs in go_library edge, got: %s", edge)
+	}
+	if !strings.Contains(edge, "cmd = go build -trimpath -buildmode=archive -o libapi.a ../examples/src/api") {
+		t.Fatalf("Expected go_library archive build to target the package directory, got: %s", edge)
+	}
+}
+
+func TestGoBinaryImportcfgIncludesTransitiveGoArchives(t *testing.T) {
+	r := &goBinary{}
+	modules := map[string]*parser.Module{
+		"libcommon": {
+			Type: "go_library",
+			Map: &parser.Map{Properties: []*parser.Property{
+				{Name: "name", Value: &parser.String{Value: "libcommon"}},
+				{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "src/common/common.go"},
+				}}},
+			}},
+		},
+		"libapi": {
+			Type: "go_library",
+			Map: &parser.Map{Properties: []*parser.Property{
+				{Name: "name", Value: &parser.String{Value: "libapi"}},
+				{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "src/api/api.go"},
+				}}},
+				{Name: "deps", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: ":libcommon"},
+				}}},
+			}},
+		},
+		"server": {
+			Type: "go_binary",
+			Map: &parser.Map{Properties: []*parser.Property{
+				{Name: "name", Value: &parser.String{Value: "server"}},
+				{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "cmd/server/main.go"},
+				}}},
+				{Name: "deps", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: ":libapi"},
+				}}},
+			}},
+		},
+	}
+
+	ctx := DefaultRuleRenderContext()
+	ctx.PathPrefix = "../examples/"
+	ctx.Modules = modules
+	ctx.GoModulePath = "minibp"
+	ctx.GoImportPrefix = "examples"
+
+	edge := r.NinjaEdge(modules["server"], ctx)
+	if !strings.Contains(edge, "build server.a: go_build_archive ../examples/cmd/server/main.go") {
+		t.Fatalf("Expected main archive edge to depend on prefixed Go sources, got: %s", edge)
+	}
+	if !strings.Contains(edge, "build importcfg_server: go_write_importcfg ../examples/cmd/server/main.go") {
+		t.Fatalf("Expected importcfg generation edge to track the package sources, got: %s", edge)
+	}
+	if !strings.Contains(edge, "packagefile minibp/examples/src/api=libapi.a") {
+		t.Fatalf("Expected importcfg to override direct go_library archive path, got: %s", edge)
+	}
+	if !strings.Contains(edge, "packagefile minibp/examples/src/common=libcommon.a") {
+		t.Fatalf("Expected importcfg to include transitive go_library archive path, got: %s", edge)
+	}
+	if !strings.Contains(edge, "packagefile minibp/examples/cmd/server=server.a") {
+		t.Fatalf("Expected importcfg to override the main package archive path, got: %s", edge)
+	}
+	if !strings.Contains(edge, "build server: go_link server.a | importcfg_server libapi.a libcommon.a") {
+		t.Fatalf("Expected go link edge to depend on local archive outputs, got: %s", edge)
+	}
+	if strings.Contains(edge, "../examples/libapi.a") || strings.Contains(edge, "../examples/libcommon.a") {
+		t.Fatalf("Expected archive outputs to remain in the build directory, got: %s", edge)
+	}
+}
+
+func TestGoBinaryImportcfgPrefersExplicitImportPath(t *testing.T) {
+	r := &goBinary{}
+	modules := map[string]*parser.Module{
+		"libapi": {
+			Type: "go_library",
+			Map: &parser.Map{Properties: []*parser.Property{
+				{Name: "name", Value: &parser.String{Value: "libapi"}},
+				{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "lib/api/api.go"},
+				}}},
+				{Name: "importpath", Value: &parser.String{Value: "github.com/example/libapi"}},
+			}},
+		},
+		"server": {
+			Type: "go_binary",
+			Map: &parser.Map{Properties: []*parser.Property{
+				{Name: "name", Value: &parser.String{Value: "server"}},
+				{Name: "srcs", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: "cmd/server/main.go"},
+				}}},
+				{Name: "deps", Value: &parser.List{Values: []parser.Expression{
+					&parser.String{Value: ":libapi"},
+				}}},
+			}},
+		},
+	}
+
+	ctx := DefaultRuleRenderContext()
+	ctx.Modules = modules
+	ctx.GoModulePath = "minibp"
+
+	edge := r.NinjaEdge(modules["server"], ctx)
+	if !strings.Contains(edge, "packagefile github.com/example/libapi=libapi.a") {
+		t.Fatalf("Expected explicit importpath to override derived Go package path, got: %s", edge)
+	}
+}
+
 func TestGeneratorCleanTargetUsesBuildOutputs(t *testing.T) {
 	g := dag.NewGraph()
 

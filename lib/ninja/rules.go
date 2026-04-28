@@ -46,21 +46,21 @@ import (
 //
 // Method purpose:
 //   - Name(): Unique identifier for this rule type (e.g., "cc_library", "go_binary")
-//     - Used to match module types in Blueprint files
-//     - Used by GetRule() to find rule implementations
+//   - Used to match module types in Blueprint files
+//   - Used by GetRule() to find rule implementations
 //   - NinjaRule(): Returns ninja rule definitions as a string (multiple rules separated by newlines)
-//     - Defines how to compile, link, archive, or package files
-//     - Called once per rule type during ninja file generation
+//   - Defines how to compile, link, archive, or package files
+//   - Called once per rule type during ninja file generation
 //   - NinjaEdge(): Returns ninja build edges for a specific module (what to build)
-//     - Called once per module instance
-//     - Generates the actual build commands for the module's sources
+//   - Called once per module instance
+//   - Generates the actual build commands for the module's sources
 //   - Outputs(): Returns the output file paths produced by this rule
-//     - Used for dependency resolution and build order determination
-//     - May include architecture suffix for multi-arch builds
+//   - Used for dependency resolution and build order determination
+//   - May include architecture suffix for multi-arch builds
 //   - Desc(): Returns a description string for build logging (e.g., "gcc", "jar", "go")
-//     - Displayed by ninja during the build process
-//     - Empty srcFile means this is a linking/packaging step
-//     - Non-empty srcFile means this is a compilation step
+//   - Displayed by ninja during the build process
+//   - Empty srcFile means this is a linking/packaging step
+//   - Non-empty srcFile means this is a compilation step
 //
 // Edge cases:
 //   - Empty srcs should still produce valid rule output
@@ -83,53 +83,56 @@ type BuildRule interface {
 //
 // Fields:
 //   - CC: C compiler command (e.g., "gcc", "clang", "/usr/bin/clang")
-//     - Used for linking and C compilation
-//     - May be prefixed with ccache path if ccache is enabled
+//   - Used for linking and C compilation
+//   - May be prefixed with ccache path if ccache is enabled
 //   - CXX: C++ compiler command (e.g., "g++", "clang++", "/usr/bin/clang++")
-//     - Used for C++ compilation
-//     - Selected by detectCompilerType based on file extensions
+//   - Used for C++ compilation
+//   - Selected by detectCompilerType based on file extensions
 //   - AR: Static library archiver (e.g., "ar", "gcc-ar", "llvm-ar")
-//     - For LTO builds, ltoArchiveCmd may select an LTO-compatible archiver
+//   - For LTO builds, ltoArchiveCmd may select an LTO-compatible archiver
 //   - ArchSuffix: Architecture-specific suffix for outputs (e.g., "_arm64", "_x86_64")
-//     - Appended to output file names for multi-architecture builds
-//     - Set by the build system based on current build variant
+//   - Appended to output file names for multi-architecture builds
+//   - Set by the build system based on current build variant
 //   - CFlags: Global C/C++ compiler flags (e.g., "-Wall -g")
-//     - Merged with module-specific cflags and cppflags
-//     - Applied to all C/C++ compilation commands
+//   - Merged with module-specific cflags and cppflags
+//   - Applied to all C/C++ compilation commands
 //   - LdFlags: Global linker flags (e.g., "-lpthread")
-//     - Merged with module-specific ldflags
-//     - Applied to all linking commands
+//   - Merged with module-specific ldflags
+//   - Applied to all linking commands
 //   - Sysroot: Cross-compilation sysroot path (e.g., "/opt/cross/arm64")
-//     - Used for cross-compilation to provide target system headers/libraries
-//     - May be passed to compiler/linker via --sysroot= flag
+//   - Used for cross-compilation to provide target system headers/libraries
+//   - May be passed to compiler/linker via --sysroot= flag
 //   - Ccache: Path to ccache binary (empty if ccache is not available)
-//     - When set, prepended to compiler commands for caching
-//     - Speeds up incremental builds by caching compilation results
+//   - When set, prepended to compiler commands for caching
+//   - Speeds up incremental builds by caching compilation results
 //   - Lto: Default LTO mode ("full", "thin", or "" for no LTO)
-//     - Can be overridden by module-level LTO settings
-//     - Affects both compilation and linking flags
+//   - Can be overridden by module-level LTO settings
+//   - Affects both compilation and linking flags
 //   - GOOS: Go target operating system (e.g., "linux", "darwin", "windows")
-//     - Used for Go cross-compilation
-//     - Set as environment variable GOOS=X for go build
+//   - Used for Go cross-compilation
+//   - Set as environment variable GOOS=X for go build
 //   - GOARCH: Go target architecture (e.g., "amd64", "arm64")
-//     - Used for Go cross-compilation
-//     - Set as environment variable GOARCH=Y for go build
+//   - Used for Go cross-compilation
+//   - Set as environment variable GOARCH=Y for go build
 //   - PathPrefix: Prefix for file paths (used for namespace support)
-//     - Prepended to dependency file paths
-//     - Enables cross-namespace module references
+//   - Prepended to dependency file paths
+//   - Enables cross-namespace module references
 type RuleRenderContext struct {
-	CC         string
-	CXX        string
-	AR         string
-	ArchSuffix string
-	CFlags     string
-	LdFlags    string
-	Sysroot    string
-	Ccache     string
-	Lto        string
-	GOOS       string
-	GOARCH    string
-	PathPrefix string
+	CC             string
+	CXX            string
+	AR             string
+	ArchSuffix     string
+	CFlags         string
+	LdFlags        string
+	Sysroot        string
+	Ccache         string
+	Lto            string
+	GOOS           string
+	GOARCH         string
+	PathPrefix     string
+	Modules        map[string]*parser.Module
+	GoModulePath   string
+	GoImportPrefix string
 }
 
 // DefaultRuleRenderContext returns a RuleRenderContext with default toolchain values.
@@ -162,15 +165,15 @@ func DefaultRuleRenderContext() RuleRenderContext {
 //
 // The returned rules include:
 //   - C/C++ rules: cc_library, cc_library_static, cc_library_shared, cc_object, cc_binary, cc_library_headers
-//     - Handle C/C++ compilation, archiving, linking, and LTO
+//   - Handle C/C++ compilation, archiving, linking, and LTO
 //   - Go rules: go_library, go_binary, go_test
-//     - Handle Go compilation, cross-compilation, and testing
+//   - Handle Go compilation, cross-compilation, and testing
 //   - Java rules: java_library, java_binary, java_library_static, java_library_host, java_binary_host, java_test, java_import
-//     - Handle Java compilation, packaging, and manifest creation
+//   - Handle Java compilation, packaging, and manifest creation
 //   - Soong syntax rules: defaults, package, soong_namespace, phony, cc_test, genrule, cc_defaults, java_defaults, go_defaults
-//     - Handle Soong-specific module types and syntax
+//   - Handle Soong-specific module types and syntax
 //   - Other rules: filegroup, prebuilt_etc, prebuilt_usr_share, prebuilt_firmware, prebuilt_root, cc_prebuilt_binary, cc_prebuilt_library, cc_prebuilt_library_static, cc_prebuilt_library_shared, custom, proto_library, proto_gen, sh_binary_host, python_binary_host, python_test_host
-//     - Handle various other build scenarios and prebuilt artifacts
+//   - Handle various other build scenarios and prebuilt artifacts
 //
 // Note: The order of rules in this slice doesn't affect functionality,
 // but related rules are grouped together for maintainability.
@@ -267,14 +270,14 @@ func GetRule(name string) BuildRule {
 //
 // Property merging rules:
 //   - List properties (cflags, cppflags, srcs, etc.): Concatenated (defaults appended)
-//     - This allows defaults to add flags while target can override/add
-//     - Order: target values first, then defaults values
+//   - This allows defaults to add flags while target can override/add
+//   - Order: target values first, then defaults values
 //   - Non-list properties: Target module's value takes precedence
-//     - If target has the property, defaults value is ignored
-//     - If target doesn't have it, defaults value is added
+//   - If target has the property, defaults value is ignored
+//   - If target doesn't have it, defaults value is added
 //   - Excluded properties: "name" and "defaults" are never merged
-//     - "name" is the module identifier and shouldn't be copied
-//     - "defaults" would cause recursive application
+//   - "name" is the module identifier and shouldn't be copied
+//   - "defaults" would cause recursive application
 //
 // Parameters:
 //   - m: The target module to apply defaults to
@@ -286,8 +289,8 @@ func GetRule(name string) BuildRule {
 //     a. Look up the default module (stripping leading ":" if present)
 //     b. Verify it's a defaults module type
 //     c. Merge each property from defaults to target:
-//        - For lists: Append default items to existing list
-//        - For non-lists: Use target value if exists, otherwise add from defaults
+//     - For lists: Append default items to existing list
+//     - For non-lists: Use target value if exists, otherwise add from defaults
 //
 // Edge cases:
 //   - Missing defaults module: Silently skipped (no error)
@@ -462,14 +465,14 @@ func GetPackageDefaultVisibility(modules map[string]*parser.Module, modulePath s
 //
 // Fields:
 //   - ModuleName: The name of the referenced module (e.g., "libfoo")
-//     - Used to look up the module in the modules map
-//     - Should not include ":" prefix or namespace prefix
+//   - Used to look up the module in the modules map
+//   - Should not include ":" prefix or namespace prefix
 //   - Tag: Optional tag for specific outputs (e.g., ".doc.zip", ".stripped")
-//     - Used to select specific output variants from the referenced module
-//     - Empty string means all outputs or default output
+//   - Used to select specific output variants from the referenced module
+//   - Empty string means all outputs or default output
 //   - IsModuleRef: True if this is a module reference (starts with ":" or "//...:")
-//     - Used to distinguish module references from regular file paths
-//     - False for regular file paths like "src/foo.c"
+//   - Used to distinguish module references from regular file paths
+//   - False for regular file paths like "src/foo.c"
 //
 // Examples:
 //

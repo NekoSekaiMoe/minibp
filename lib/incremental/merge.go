@@ -14,7 +14,8 @@ import (
 // It collects all parsed .bp files into a single JSON file for efficient processing.
 //
 // This is the intermediate format described in tasks.md step:
-//   Input -> parse -> .bp.json -> collect -> build.json -> convert -> build.ninja
+//
+//	Input -> parse -> .bp.json -> collect -> build.json -> convert -> build.ninja
 //
 // The build.json allows the system to:
 //   - Merge all parsed Blueprint files into one structured file
@@ -41,7 +42,8 @@ type BuildJSON struct {
 // MergeToBuildJSON collects all parsed .bp files into a BuildJSON structure.
 //
 // This function implements the "collect" step from tasks.md:
-//   Input -> parse -> .bp.json -> collect -> build.json -> convert -> build.ninja
+//
+//	Input -> parse -> .bp.json -> collect -> build.json -> convert -> build.ninja
 //
 // For each .bp file in the input list:
 //   - Check if the file needs reparsing by comparing its hash with the cached dep.json
@@ -54,15 +56,15 @@ type BuildJSON struct {
 //
 // Parameters:
 //   - mgr: The incremental.Manager that handles caching and dependency tracking.
-//           It provides NeedsReparse(), LoadJSON(), SaveJSON(), and SaveDepFile() methods.
+//     It provides NeedsReparse(), LoadJSON(), SaveJSON(), and SaveDepFile() methods.
 //   - files: List of .bp file paths to process (absolute or relative to workDir).
 //
 // Returns:
 //   - *BuildJSON: Merged structure containing all parsed files, with Sources map
-//                 keyed by relative paths (e.g., "Android.bp", "subdir/Android.bp").
+//     keyed by relative paths (e.g., "Android.bp", "subdir/Android.bp").
 //   - error: Non-nil if mgr.NeedsReparse fails, file cannot be read/parsed,
-//            or dep file cannot be saved. Parse errors are collected and reported
-//            in one batch rather than failing immediately.
+//     or dep file cannot be saved. Parse errors are collected and reported
+//     in one batch rather than failing immediately.
 //
 // Edge cases:
 //   - Parse errors are collected and reported in one batch (never fail immediately).
@@ -202,13 +204,13 @@ func MergeToBuildJSON(mgr *Manager, files []string) (*BuildJSON, error) {
 //
 // Parameters:
 //   - buildJSON: The BuildJSON structure to serialize and save.
-//                 Must not be nil; contains merged AST from all .bp files.
+//     Must not be nil; contains merged AST from all .bp files.
 //   - path: Output file path (usually ".minibp/build.json").
-//           Parent directories must exist; this function does not create them.
+//     Parent directories must exist; this function does not create them.
 //
 // Returns:
 //   - error: JSON marshaling error (invalid types, circular refs) or
-//            file write error (permissions, disk full). Wrapped with context.
+//     file write error (permissions, disk full). Wrapped with context.
 //
 // Edge cases:
 //   - Nil buildJSON will cause panic during marshaling (caller responsibility).
@@ -241,14 +243,14 @@ func SaveBuildJSON(buildJSON *BuildJSON, path string) error {
 //
 // Parameters:
 //   - path: Path to the build.json file to load.
-//           File must exist and be valid JSON; no auto-creation.
+//     File must exist and be valid JSON; no auto-creation.
 //
 // Returns:
 //   - *BuildJSON: Loaded and unmarshaled structure on success.
-//                 Returns nil (not an error) if file doesn't exist.
+//     Returns nil (not an error) if file doesn't exist.
 //   - error: File read error (permissions, disk issues) or
-//            JSON unmarshal error (corrupt or invalid format).
-//            Unmarshal errors are wrapped with context.
+//     JSON unmarshal error (corrupt or invalid format).
+//     Unmarshal errors are wrapped with context.
 //
 // Edge cases:
 //   - Missing file: returns nil, error (from readFile/os.ReadFile).
@@ -313,7 +315,7 @@ func readFileContent(path string) ([]byte, error) {
 // Returns:
 //   - []byte: File contents as a byte slice.
 //   - error: Non-nil if file cannot be read (not found, permission denied,
-//            I/O error, or path is a directory).
+//     I/O error, or path is a directory).
 //
 // Edge cases:
 //   - Path with ".." components: resolved relative to current working directory.
@@ -335,7 +337,7 @@ func readFile(path string) ([]byte, error) {
 //
 // Returns:
 //   - error: Non-nil if file cannot be written (permissions, disk full,
-//            parent directory missing, or path is a directory).
+//     parent directory missing, or path is a directory).
 //
 // Edge cases:
 //   - Existing file: content is truncated and overwritten (not appended).

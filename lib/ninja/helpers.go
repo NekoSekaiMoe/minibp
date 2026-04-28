@@ -586,10 +586,10 @@ func getTestOptionArgs(m *parser.Module) string {
 // GetMapProp retrieves a map property value from a module.
 // Map properties are nested property structures, like:
 //
-//   test_options {
-//     args: ["-v", "-cover"],
-//     env: ["FOO=bar"],
-//   }
+//	test_options {
+//	  args: ["-v", "-cover"],
+//	  env: ["FOO=bar"],
+//	}
 //
 // Parameters:
 //   - m: The parser.Module to get the property from

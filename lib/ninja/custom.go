@@ -120,7 +120,7 @@ func (r *customRule) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	}
 
-out := outs[0]
+	out := outs[0]
 
 	inStr := strings.Join(srcs, " ")
 	escapedInStr := strings.Join(escapeList(srcs), " ")

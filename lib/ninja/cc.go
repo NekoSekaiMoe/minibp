@@ -165,20 +165,20 @@ func (r *ccLibrary) Name() string { return "cc_library" }
 //
 // The generated rules include:
 //   - cc_compile: Standard C/C++ compilation with dependency tracking
-//     - Uses -MMD -MF to generate .d dependency files for incremental builds
-//     - deps = gcc tells ninja to parse GCC-style dependency files
+//   - Uses -MMD -MF to generate .d dependency files for incremental builds
+//   - deps = gcc tells ninja to parse GCC-style dependency files
 //   - cc_compile_lto: Compilation with LTO enabled
-//     - Produces object files with LTO information for whole-program optimization
+//   - Produces object files with LTO information for whole-program optimization
 //   - cc_archive: Archive static library from object files
-//     - Uses ar rcs or gcc-ar for LTO compatibility
-//     - restat = true tells ninja to recheck timestamp after rule execution
+//   - Uses ar rcs or gcc-ar for LTO compatibility
+//   - restat = true tells ninja to recheck timestamp after rule execution
 //   - cc_shared: Link shared library from object files
-//     - Uses response files (@$out.rsp) to handle large numbers of inputs
-//     - rspfile_content = $in writes all inputs to the response file
+//   - Uses response files (@$out.rsp) to handle large numbers of inputs
+//   - rspfile_content = $in writes all inputs to the response file
 //   - cc_link_lto: Link with LTO enabled
-//     - Requires LTO-compatible linker (typically gold or lld)
+//   - Requires LTO-compatible linker (typically gold or lld)
 //   - thinlto_codegen: Generate thin LTO intermediate files
-//     - -fthin-link generates intermediate files for parallel LTO optimization
+//   - -fthin-link generates intermediate files for parallel LTO optimization
 //
 // Parameters:
 //   - ctx: Rule render context with toolchain and flags
@@ -191,9 +191,9 @@ func (r *ccLibrary) Name() string { return "cc_library" }
 //   - ccache enabled: Compiler commands are prefixed with ccache path
 //   - Custom AR: Uses ltoArchiveCmd to select appropriate archiver for LTO
 func (r *ccLibrary) NinjaRule(ctx RuleRenderContext) string {
-		arCmd := ltoArchiveCmd(ctx.AR, ctx.Lto)
-		ltoCompile, ltoLink := ltoFlags(ctx.Lto)
-		rules := fmt.Sprintf(`rule cc_compile
+	arCmd := ltoArchiveCmd(ctx.AR, ctx.Lto)
+	ltoCompile, ltoLink := ltoFlags(ctx.Lto)
+	rules := fmt.Sprintf(`rule cc_compile
 	command = %s -c $in -o $out $flags -MMD -MF $out.d
 	depfile = $out.d
 	deps = gcc
@@ -378,7 +378,7 @@ func (r *ccLibrary) Desc(m *parser.Module, srcFile string) string {
 //   - cc_compile: Standard C/C++ compilation with -MMD -MF for dependencies
 //   - cc_compile_lto: Compilation with LTO enabled for whole-program optimization
 //   - cc_archive: Archive object files into static library using ar or gcc-ar
-//     - restat = true ensures ninja rechecks timestamp after archiving
+//   - restat = true ensures ninja rechecks timestamp after archiving
 //
 // Unlike ccLibrary, this type never generates shared library rules (cc_shared, cc_link_lto).
 // This is useful for creating static-only libraries that can be linked into final binaries.
@@ -393,12 +393,12 @@ func (r *ccLibraryStatic) Name() string { return "cc_library_static" }
 //
 // The generated rules include:
 //   - cc_compile: Standard C/C++ compilation with dependency tracking
-//     - Uses -MMD -MF to generate .d dependency files
-//     - deps = gcc tells ninja to parse GCC-style dependency files
+//   - Uses -MMD -MF to generate .d dependency files
+//   - deps = gcc tells ninja to parse GCC-style dependency files
 //   - cc_compile_lto: Compilation with LTO enabled for whole-program optimization
 //   - cc_archive: Archive object files into static library
-//     - Uses ar rcs or gcc-ar (for LTO compatibility)
-//     - restat = true tells ninja to recheck timestamp after rule execution
+//   - Uses ar rcs or gcc-ar (for LTO compatibility)
+//   - restat = true tells ninja to recheck timestamp after rule execution
 //
 // Unlike ccLibrary, this does NOT generate shared library rules (cc_shared, cc_link_lto).
 //
@@ -549,7 +549,7 @@ func (r *ccLibraryStatic) Desc(m *parser.Module, srcFile string) string {
 //   - cc_compile: Standard C/C++ compilation with -MMD -MF for dependencies
 //   - cc_compile_lto: Compilation with LTO enabled for whole-program optimization
 //   - cc_shared: Link object files into shared library with -shared flag
-//     - Uses response files (@$out.rsp) to handle large numbers of inputs
+//   - Uses response files (@$out.rsp) to handle large numbers of inputs
 //   - cc_link_lto: Link with LTO enabled (requires LTO-compatible linker)
 //
 // Unlike ccLibrary, this type never generates static archive rules (cc_archive).
@@ -565,14 +565,14 @@ func (r *ccLibraryShared) Name() string { return "cc_library_shared" }
 //
 // The generated rules include:
 //   - cc_compile: Standard C/C++ compilation with dependency tracking
-//     - Uses -MMD -MF to generate .d dependency files
-//     - deps = gcc tells ninja to parse GCC-style dependency files
+//   - Uses -MMD -MF to generate .d dependency files
+//   - deps = gcc tells ninja to parse GCC-style dependency files
 //   - cc_compile_lto: Compilation with LTO enabled for whole-program optimization
 //   - cc_shared: Link object files into shared library
-//     - Uses -shared flag to create shared object
-//     - Uses response files (@$out.rsp) for large numbers of inputs
+//   - Uses -shared flag to create shared object
+//   - Uses response files (@$out.rsp) for large numbers of inputs
 //   - cc_link_lto: Link with LTO enabled
-//     - Requires LTO-compatible linker (typically gold or lld)
+//   - Requires LTO-compatible linker (typically gold or lld)
 //
 // Unlike ccLibrary, this does NOT generate static archive rules (cc_archive).
 //
@@ -766,8 +766,8 @@ func (r *ccObject) Name() string { return "cc_object" }
 //
 // The generated rules include:
 //   - cc_compile: Standard C/C++ compilation with dependency tracking
-//     - Uses -MMD -MF to generate .d dependency files
-//     - deps = gcc tells ninja to parse GCC-style dependency files
+//   - Uses -MMD -MF to generate .d dependency files
+//   - deps = gcc tells ninja to parse GCC-style dependency files
 //   - cc_compile_lto: Compilation with LTO enabled for whole-program optimization
 //
 // Unlike other cc types, this does NOT generate archive or link rules.
@@ -798,7 +798,8 @@ rule cc_compile_lto
 // Returns nil if the module has no name (invalid module).
 // If there is only one source file, returns a single .o file: {name}{suffix}.o
 // If there are multiple source files, returns one .o file per source:
-//   objectOutputName(name, src) for each src in srcs.
+//
+//	objectOutputName(name, src) for each src in srcs.
 //
 // Parameters:
 //   - m: Module being evaluated (must have "name" and "srcs" properties)
@@ -909,7 +910,7 @@ func (r *ccObject) Desc(m *parser.Module, srcFile string) string {
 //   - cc_compile: Standard C/C++ compilation with -MMD -MF for dependencies
 //   - cc_compile_lto: Compilation with LTO enabled for whole-program optimization
 //   - cc_link: Link object files into executable
-//     - Uses response files (@$out.rsp) to handle large numbers of inputs
+//   - Uses response files (@$out.rsp) to handle large numbers of inputs
 //   - cc_link_lto: Link with LTO enabled (requires LTO-compatible linker)
 //   - cc_archive: Archive object files for static library dependencies
 //   - thinlto_codegen: Generate thin LTO intermediate files for incremental builds
@@ -927,15 +928,15 @@ func (r *ccBinary) Name() string { return "cc_binary" }
 //
 // The generated rules include:
 //   - cc_compile: Standard C/C++ compilation with dependency tracking
-//     - Uses -MMD -MF to generate .d dependency files
-//     - deps = gcc tells ninja to parse GCC-style dependency files
+//   - Uses -MMD -MF to generate .d dependency files
+//   - deps = gcc tells ninja to parse GCC-style dependency files
 //   - cc_compile_lto: Compilation with LTO enabled for whole-program optimization
 //   - cc_link: Link object files into executable
-//     - Uses response files (@$out.rsp) to handle large numbers of inputs
+//   - Uses response files (@$out.rsp) to handle large numbers of inputs
 //   - cc_link_lto: Link with LTO enabled (requires LTO-compatible linker)
-//     - Note: Different from cc_shared, uses $in directly (not response file)
+//   - Note: Different from cc_shared, uses $in directly (not response file)
 //   - cc_archive: Archive object files for static library dependencies
-//     - restat = true tells ninja to recheck timestamp after archiving
+//   - restat = true tells ninja to recheck timestamp after archiving
 //   - thinlto_codegen: Generate thin LTO intermediate files
 //
 // Parameters:
@@ -1167,6 +1168,7 @@ func (r *ccLibraryHeaders) Outputs(m *parser.Module, ctx RuleRenderContext) []st
 	}
 	return []string{name + ".h"}
 }
+
 // NinjaEdge returns empty string since header libraries don't need build edges.
 // Header-only modules don't produce build artifacts that need compilation.
 //
@@ -1187,7 +1189,7 @@ func (r *ccLibraryHeaders) NinjaEdge(m *parser.Module, ctx RuleRenderContext) st
 //
 // Returns:
 //   - Empty string (no description needed)
-func (r *ccLibraryHeaders) Desc(m *parser.Module, srcFile string) string             { return "" }
+func (r *ccLibraryHeaders) Desc(m *parser.Module, srcFile string) string { return "" }
 
 // ccTestEdge generates a ninja build edge for a C/C++ test executable.
 // This is a helper function used by the ccTestRule type to generate the
