@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	buildlib "minibp/lib/build"
+	"minibp/lib/errors"
 	"minibp/lib/incremental"
 	"minibp/lib/namespace"
 	"minibp/lib/parser"
@@ -28,7 +29,9 @@ var (
 		// This ensures that files outside the intended directory cannot be accessed.
 		cleanPath := pathutil.SanitizePath(path)
 		if cleanPath != path {
-			return nil, fmt.Errorf("invalid path: contains '..'")
+			// Path traversal attempt detected - reject the path for security.
+			return nil, errors.Config("invalid path: contains '..'").
+				WithSuggestion("Use absolute paths or paths within the project directory")
 		}
 		return os.Open(filepath.Clean(path))
 	}
@@ -103,7 +106,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 	// instead of being reparsed. New or modified .bp files are parsed and cached.
 	incManager, err := incremental.NewManager(cfg.SrcDir)
 	if err != nil {
-		return fmt.Errorf("incremental manager: %w", err)
+		// Failed to create incremental manager - likely output path issue.
+		return errors.Config("failed to create incremental manager").
+			WithCause(err).
+			WithSuggestion("Check that the source directory exists and is accessible")
 	}
 
 	// Determine if we should use build.json for multi-file builds.
@@ -142,7 +148,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 		// and is used for incremental builds in subsequent runs.
 		buildJSONPath := filepath.Join(cfg.SrcDir, ".minibp", "build.json")
 		if err := incremental.SaveBuildJSON(buildJSON, buildJSONPath); err != nil {
-			return fmt.Errorf("save build.json: %w", err)
+			// Failed to save build.json - not fatal but degrades incremental behavior.
+			return errors.Config("failed to save build.json").
+				WithCause(err).
+				WithSuggestion("Check write permissions for .minibp/ directory")
 		}
 
 		// Generate ninja build file directly from the BuildJSON representation.
@@ -160,11 +169,12 @@ func run(args []string, stdout, stderr io.Writer) error {
 		//   - eval: Expression evaluator for variable substitution and select() expressions
 		//   - cfg.OutFile: Output path for the generated build.ninja file
 		buildOpts := toBuildOptions(cfg.BuildOptions())
-		if err := buildlib.GenerateFromBuildJSON(buildJSON, buildOpts, eval, cfg.OutFile); err != nil {
+		numModules, err := buildlib.GenerateFromBuildJSON(buildJSON, buildOpts, eval, cfg.OutFile)
+		if err != nil {
 			return err
 		}
 
-		fmt.Fprintf(stdout, "Generated %s from build.json\n", cfg.OutFile)
+		fmt.Fprintf(stdout, "Generated %s with %d modules\n", cfg.OutFile, numModules)
 		return nil
 	}
 
@@ -331,7 +341,10 @@ func parseDefinitionsFromFiles(files []string) ([]parser.Definition, error) {
 		// or contains directory traversal attempts (e.g., "../").
 		f, err := openInputFile(file)
 		if err != nil {
-			return nil, fmt.Errorf("error opening %s: %w", file, err)
+			// Failed to open file - likely file not found or permission issue.
+			return nil, errors.NotFound(file).
+				WithCause(err).
+				WithSuggestion("Check that the file exists and has read permissions")
 		}
 
 		// Read source content for error display.
@@ -341,7 +354,10 @@ func parseDefinitionsFromFiles(files []string) ([]parser.Definition, error) {
 		source, readErr := io.ReadAll(f)
 		f.Close()
 		if readErr != nil {
-			return nil, fmt.Errorf("error reading %s: %w", file, readErr)
+			// Failed to read file contents - could be disk error or file truncated.
+			return nil, errors.NotFound(file).
+				WithCause(readErr).
+				WithSuggestion("Check file integrity and disk health")
 		}
 
 		// Re-open file for parsing.
@@ -350,7 +366,10 @@ func parseDefinitionsFromFiles(files []string) ([]parser.Definition, error) {
 		// the parser interface expects a file for proper source mapping.
 		f, err = openInputFile(file)
 		if err != nil {
-			return nil, fmt.Errorf("error opening %s: %w", file, err)
+			// Failed to open file - likely file not found or permission issue.
+			return nil, errors.NotFound(file).
+				WithCause(err).
+				WithSuggestion("Check that the file exists and has read permissions")
 		}
 
 		// Parse the Blueprint file into an AST.
@@ -372,7 +391,9 @@ func parseDefinitionsFromFiles(files []string) ([]parser.Definition, error) {
 		if closeErr != nil {
 			// Report close error but don't mask earlier parse error.
 			// If we got here, parse succeeded, but we still report the close error.
-			return nil, fmt.Errorf("error closing %s: %w", file, closeErr)
+			return nil, errors.Config(fmt.Sprintf("failed to close file: %s", file)).
+				WithCause(closeErr).
+				WithSuggestion("Check disk health and file system integrity")
 		}
 		// Append definitions from this file to the combined result.
 		// Each parser.File contains a Defs slice with all definitions in that file.
@@ -511,7 +532,13 @@ func parseDefinitionsIncrementally(mgr *incremental.Manager, files []string) ([]
 	// Report all collected parse errors at once.
 	// This allows the user to fix all syntax errors in one pass.
 	if len(parseErrors) > 0 {
-		return nil, fmt.Errorf("parsing failed: %s", strings.Join(parseErrors, "; "))
+		// Aggregate syntax errors from all files with proper formatting.
+		errMsg := fmt.Sprintf("parsing failed for %d file(s):", len(parseErrors))
+		for _, e := range parseErrors {
+			errMsg += "\n  - " + e
+		}
+		return nil, errors.Syntax(errMsg).
+			WithSuggestion("Fix syntax errors in the listed Blueprint files and retry")
 	}
 	return allDefs, nil
 }
@@ -552,7 +579,10 @@ func generateNinjaFile(path string, gen interface{ Generate(io.Writer) error }) 
 	// If the file already exists, it will be truncated to zero length.
 	out, err := createOutputFile(path)
 	if err != nil {
-		return fmt.Errorf("error creating output: %w", err)
+		// Failed to create output file - likely permission or disk space issue.
+		return errors.Config(fmt.Sprintf("failed to create output file: %s", path)).
+			WithCause(err).
+			WithSuggestion("Check write permissions and available disk space")
 	}
 
 	// Generate the Ninja build file content.
@@ -575,16 +605,22 @@ func generateNinjaFile(path string, gen interface{ Generate(io.Writer) error }) 
 		if closeErr != nil {
 			// Both generation and removal failed.
 			// Report both errors so the user knows what happened.
-			return fmt.Errorf("error generating ninja: %w; error removing incomplete file: %v", genErr, closeErr)
+			return errors.Config("ninja generation failed and could not remove incomplete file").
+				WithCause(genErr).
+				WithSuggestion("Check disk space and permissions for output file")
 		}
-		return fmt.Errorf("error generating ninja: %w", genErr)
+		return errors.Config("failed to generate ninja build file").
+			WithCause(genErr).
+			WithSuggestion("Check BuildJSON structure and module definitions")
 	}
 
 	// Generation succeeded; report any close error.
 	// A close error at this point typically means the final flush failed
 	// (e.g., disk full when writing buffered data).
 	if closeErr != nil {
-		return fmt.Errorf("error closing output: %w", closeErr)
+		return errors.Config("failed to close output file after successful generation").
+			WithCause(closeErr).
+			WithSuggestion("Check disk space and file system health")
 	}
 	return nil
 }

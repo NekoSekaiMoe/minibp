@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"minibp/lib/errors"
 	"minibp/lib/parser"
 )
 
@@ -93,7 +94,10 @@ func MergeToBuildJSON(mgr *Manager, files []string) (*BuildJSON, error) {
 		needsReparse, err := mgr.NeedsReparse(file)
 		if err != nil {
 			// Fail immediately on hash check errors (file access issues).
-			return nil, fmt.Errorf("check reparse %s: %w", file, err)
+			// Use NotFound error for file-related issues with proper context.
+			return nil, errors.NotFound(file).
+				WithCause(err).
+				WithSuggestion("Check that the file exists and is readable")
 		}
 
 		var parsedFile *parser.File
@@ -118,7 +122,11 @@ func MergeToBuildJSON(mgr *Manager, files []string) (*BuildJSON, error) {
 			// readFileContent is a thin wrapper around os.ReadFile.
 			source, err := readFileContent(file)
 			if err != nil {
-				return nil, fmt.Errorf("read %s: %w", file, err)
+				// Failed to read file contents - likely permission or file not found.
+				// Use NotFound error with file path and underlying cause.
+				return nil, errors.NotFound(file).
+					WithCause(err).
+					WithSuggestion("Check file permissions and ensure the file exists")
 			}
 
 			// Parse the Blueprint file into an AST (Abstract Syntax Tree).
@@ -160,13 +168,24 @@ func MergeToBuildJSON(mgr *Manager, files []string) (*BuildJSON, error) {
 	// This updates .minibp/dep.json with current file hashes so that
 	// the next run can detect which files have changed.
 	if err := mgr.SaveDepFile(); err != nil {
-		return nil, fmt.Errorf("save dep file: %w", err)
+		// Dependency file save failure - not fatal for current build
+		// but will cause full reparse on next run.
+		return nil, errors.Config("failed to save dependency file").
+			WithCause(err).
+			WithSuggestion("Check write permissions for .minibp/ directory")
 	}
 
 	// Report all collected parse errors at once.
 	// This gives the user a complete list of all syntax errors.
 	if len(parseErrors) > 0 {
-		return nil, fmt.Errorf("parsing failed: %s", fmt.Sprint(parseErrors))
+		// Aggregate syntax errors from multiple files with proper formatting.
+		// Build a comprehensive error message listing all parse failures.
+		errMsg := fmt.Sprintf("parsing failed for %d file(s):", len(parseErrors))
+		for _, e := range parseErrors {
+			errMsg += "\n  - " + e
+		}
+		return nil, errors.Syntax(errMsg).
+			WithSuggestion("Fix syntax errors in the listed Blueprint files and retry")
 	}
 
 	return buildJSON, nil
@@ -202,7 +221,11 @@ func SaveBuildJSON(buildJSON *BuildJSON, path string) error {
 	// This makes build.json easier to inspect for debugging.
 	data, err := json.MarshalIndent(buildJSON, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal build.json: %w", err)
+		// JSON marshaling failed - likely due to invalid types in the AST
+		// (e.g., channels, functions, circular references).
+		return errors.Config("failed to marshal build.json").
+			WithCause(err).
+			WithSuggestion("Check that the AST contains only serializable types")
 	}
 	// Write the JSON bytes to disk using the helper function.
 	// Uses 0644 permissions (rw-r--r--).
@@ -247,7 +270,11 @@ func LoadBuildJSON(path string) (*BuildJSON, error) {
 	// If JSON has extra fields, they are ignored (default Go behavior).
 	var buildJSON BuildJSON
 	if err := json.Unmarshal(data, &buildJSON); err != nil {
-		return nil, fmt.Errorf("unmarshal build.json: %w", err)
+		// JSON unmarshaling failed - file is corrupt or has wrong format.
+		// This usually means build.json was manually edited or is stale.
+		return nil, errors.Config("failed to unmarshal build.json").
+			WithCause(err).
+			WithSuggestion("Delete .minibp/build.json and re-run to regenerate it")
 	}
 
 	return &buildJSON, nil

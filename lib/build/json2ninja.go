@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 
+	"minibp/lib/errors"
 	"minibp/lib/incremental"
 	"minibp/lib/namespace"
 	"minibp/lib/parser"
@@ -47,20 +48,20 @@ func GenerateFromBuildJSON(
 	opts Options,
 	eval *parser.Evaluator,
 	outputPath string,
-) error {
-	// Step 1: Collect all definitions from all sources in BuildJSON.
+) (int, error) {
+	// Step1: Collect all definitions from all sources in BuildJSON.
 	// BuildJSON.Sources contains parsed File structures from each .bp file that was
 	// merged. Each File has a Defs slice containing modules, assignments, and namespaces.
 	// This flattens all definitions into a single slice for downstream processing.
 	allDefs := collectAllDefs(buildJSON)
 
-	// Step 2: Process variable assignments across all collected definitions.
+	// Step2: Process variable assignments across all collected definitions.
 	// This evaluates top-level variable assignments (e.g., "my_var = "value"") and
 	// registers them in the evaluator's variable map. These variables can then be
 	// referenced in module properties via "${my_var}" syntax throughout the pipeline.
 	eval.ProcessAssignmentsFromDefs(allDefs)
 
-	// Step 3: Collect enabled modules from all definitions.
+	// Step3: Collect enabled modules from all definitions.
 	// This function performs several sub-steps:
 	//   a. Filters definitions to only Module types (skips assignments/namespaces)
 	//   b. Extracts module name using the provided name function
@@ -73,10 +74,10 @@ func GenerateFromBuildJSON(
 		return props.GetStringPropEval(m, key, eval)
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	// Step 4: Build namespace map for soong_namespace resolution.
+	// Step4: Build namespace map for soong_namespace resolution.
 	// This creates a mapping from namespace-qualified names (e.g., "//myns:module")
 	// to module metadata. It enables cross-namespace module references in dependency
 	// properties (deps, shared_libs, header_libs, data) to be resolved correctly.
@@ -85,7 +86,7 @@ func GenerateFromBuildJSON(
 		return props.GetStringPropEval(m, key, eval)
 	})
 
-	// Step 5: Construct the module dependency graph.
+	// Step5: Construct the module dependency graph.
 	// Creates a directed acyclic graph (DAG) where:
 	//   - Nodes are enabled modules (from the modules map)
 	//   - Edges represent dependencies (from deps, shared_libs, header_libs, data properties)
@@ -93,7 +94,7 @@ func GenerateFromBuildJSON(
 	// The graph is later used for topological sorting to determine build order.
 	graph := BuildGraph(modules, namespaces, eval)
 
-	// Step 6: Create the Ninja generator with all build rules and configuration.
+	// Step6: Create the Ninja generator with all build rules and configuration.
 	// The generator is configured with:
 	//   - Dependency graph (for build order and rule generation)
 	//   - Module map (for per-module build rule emission)
@@ -103,11 +104,14 @@ func GenerateFromBuildJSON(
 	//   - Path prefix (relative path from build dir to source dir for file references)
 	gen := NewGenerator(graph, modules, opts)
 
-	// Step 7: Generate the Ninja build file and write it to disk.
+	// Step7: Generate the Ninja build file and write it to disk.
 	// This invokes the generator to write all build rules, build statements, and
 	// variables to the output file. If generation fails, the incomplete file is
 	// removed to prevent stale builds. On success, build.ninja is ready for Ninja.
-	return generateNinjaFile(outputPath, gen)
+	if err := generateNinjaFile(outputPath, gen); err != nil {
+		return 0, err
+	}
+	return len(modules), nil
 }
 
 // collectAllDefs extracts all definitions from all sources in the BuildJSON structure.
@@ -229,7 +233,11 @@ func generateNinjaFile(path string, gen interface{ Generate(io.Writer) error }) 
 	// This ensures no stale content remains from a previous build.ninja.
 	out, err := os.Create(path)
 	if err != nil {
-		return fmt.Errorf("error creating output: %w", err)
+		// Failed to create output file - likely permission or disk space issue.
+		// Use Config error for build output issues with proper context.
+		return errors.Config(fmt.Sprintf("failed to create output file: %s", path)).
+			WithCause(err).
+			WithSuggestion("Check write permissions and available disk space")
 	}
 
 	// Invoke the generator to write all Ninja build content to the output file.
@@ -252,15 +260,21 @@ func generateNinjaFile(path string, gen interface{ Generate(io.Writer) error }) 
 		closeErr = os.Remove(path)
 		if closeErr != nil {
 			// Both generation and removal failed; report both errors.
-			return fmt.Errorf("error generating ninja: %w; error removing incomplete file: %v", genErr, closeErr)
+			return errors.Config("ninja generation failed and could not remove incomplete file").
+				WithCause(genErr).
+				WithSuggestion("Check disk space and permissions for output file")
 		}
-		return fmt.Errorf("error generating ninja: %w", genErr)
+		return errors.Config("failed to generate ninja build file").
+			WithCause(genErr).
+			WithSuggestion("Check BuildJSON structure and module definitions")
 	}
 
 	// Generation succeeded but close may have failed (e.g., flush error).
 	// Report the close error so the caller knows the file may be incomplete.
 	if closeErr != nil {
-		return fmt.Errorf("error closing output: %w", closeErr)
+		return errors.Config("failed to close output file after successful generation").
+			WithCause(closeErr).
+			WithSuggestion("Check disk space and file system health")
 	}
 	return nil
 }
