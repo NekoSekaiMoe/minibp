@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"minibp/lib/build"
 	"minibp/lib/parser"
@@ -289,7 +290,7 @@ func (cfg RunConfig) BuildOptions() BuildOptions {
 //
 // If git commit cannot be determined (git not available, not in a git repo,
 // or during release builds), "unknown" is used instead of the commit hash.
-// If build date cannot be determined, defaults to "2026-04-21".
+// If build date cannot be determined, defaults to current date.
 //
 // Parameters:
 //   - (none)
@@ -309,7 +310,7 @@ func GetVersion() string {
 	}
 	buildDate := v.BuildDate
 	if buildDate == "unknown" {
-		buildDate = "2026-04-21"
+			buildDate = time.Now().Format("2006-01-02")
 	}
 	return fmt.Sprintf("%s (git: %s, built: %s, go: %s)", v.MinibpVer, gitCommit, buildDate, v.GoVersion)
 }
