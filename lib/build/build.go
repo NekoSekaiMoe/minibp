@@ -506,6 +506,9 @@ func buildRegenCmd(opts Options) string {
 	if opts.Arch != "" {
 		regenCmd += " -arch " + opts.Arch
 	}
+	if opts.TargetOS != "" {
+		regenCmd += " -os " + opts.TargetOS
+	}
 	// Check if the single input is a directory to add -a (scan all) flag.
 	if len(opts.Inputs) == 1 {
 		fi, err := os.Stat(opts.Inputs[0])

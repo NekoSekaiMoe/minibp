@@ -1398,6 +1398,107 @@ func (u *Unset) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON implements json.Marshaler for ExecScript.
+//
+// Serializes ExecScript expression to JSON byte array.
+// ExecScript represents a script execution during configuration phase.
+//
+// How it works:
+//  1. Use anonymous struct as intermediate representation
+//  2. Add "type": "exec_script" field to identify the expression type
+//  3. Copy keyword position and command expression
+//  4. Copy args slice (each element's MarshalJSON will be called)
+//  5. Call json.Marshal() to serialize
+//
+// JSON format:
+//
+//	{
+//	  "type": "exec_script",
+//	  "keyword_pos": "Android.bp:10:1",
+//	  "command": {...},
+//	  "args": [{...}, ...]
+//	}
+//
+// Parameters:
+//   - No explicit parameters, receiver is *ExecScript
+//
+// Returns:
+//   - []byte: JSON representation of ExecScript
+//   - error: Error during JSON serialization, if any
+//
+// Edge cases:
+//   - Command field is serialized via its MarshalJSON method
+//   - Args is a slice of Expression, each element's MarshalJSON will be called
+//   - Empty args slice is serialized as []
+//   - Position fields are converted to strings via posToString()
+func (e *ExecScript) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type       string       `json:"type"`
+		KeywordPos string       `json:"keyword_pos"`
+		Command    Expression   `json:"command"`
+		Args       []Expression `json:"args"`
+	}{
+		Type:       "exec_script",
+		KeywordPos: posToString(e.KeywordPos),
+		Command:    e.Command,
+		Args:       e.Args,
+	})
+}
+
+// UnmarshalJSON implements json.Unmarshaler for ExecScript.
+//
+// Deserializes JSON byte array to ExecScript expression.
+// Restores keyword position and command/args expressions.
+//
+// How it works:
+//  1. Use intermediate struct with raw message for command and args
+//  2. Call json.Unmarshal() to deserialize into intermediate struct
+//  3. Convert position string back to scanner.Position via stringToPos()
+//  4. Use unmarshalExpression() to deserialize command and each arg
+//
+// Parameters:
+//   - data: JSON format byte array
+//
+// Returns:
+//   - error: Error during JSON deserialization, if any
+//
+// Edge cases:
+//   - Invalid "keyword_pos" format returns zero-value position
+//   - Invalid JSON format returns parse error
+//   - Command and args are deserialized using unmarshalExpression()
+func (e *ExecScript) UnmarshalJSON(data []byte) error {
+	aux := &struct {
+		KeywordPos string            `json:"keyword_pos"`
+		Command    json.RawMessage   `json:"command"`
+		Args       []json.RawMessage `json:"args"`
+	}{}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	e.KeywordPos = stringToPos(aux.KeywordPos)
+
+	if len(aux.Command) > 0 {
+		cmd, err := unmarshalExpression(aux.Command)
+		if err != nil {
+			return err
+		}
+		e.Command = cmd
+	}
+
+	if len(aux.Args) > 0 {
+		e.Args = make([]Expression, 0, len(aux.Args))
+		for _, raw := range aux.Args {
+			arg, err := unmarshalExpression(raw)
+			if err != nil {
+				return err
+			}
+			e.Args = append(e.Args, arg)
+		}
+	}
+
+	return nil
+}
+
 // MarshalJSON implements json.Marshaler for File.
 //
 // Description:
@@ -1579,6 +1680,12 @@ func unmarshalExpression(raw json.RawMessage) (Expression, error) {
 		return &expr, nil
 	case "unset":
 		var expr Unset
+		if err := json.Unmarshal(raw, &expr); err != nil {
+			return nil, err
+		}
+		return &expr, nil
+	case "exec_script":
+		var expr ExecScript
 		if err := json.Unmarshal(raw, &expr); err != nil {
 			return nil, err
 		}

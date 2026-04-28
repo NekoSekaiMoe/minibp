@@ -26,7 +26,9 @@
 package parser
 
 import (
+	"encoding/json"
 	"fmt"
+	"os/exec"
 	"reflect"
 	"regexp"
 	"strings"
@@ -298,6 +300,9 @@ func (e *Evaluator) Eval(expr Expression) interface{} {
 	case *Unset:
 		// Unset returns the sentinel value for caller to handle
 		return UnsetSentinel
+	case *ExecScript:
+		// Execute script during evaluation phase
+		return e.evalExecScript(v)
 	default:
 		// Unknown expression type returns nil
 		return nil
@@ -858,6 +863,54 @@ func (e *Evaluator) evalSelectCondition(cond ConfigurableCondition) interface{} 
 		// Fall back to config lookup
 		return e.config[cond.FunctionName]
 	}
+}
+
+// evalExecScript executes a script during the evaluation phase and returns its output.
+// The script is executed via os/exec.Command, and its stdout is captured.
+// If the output is valid JSON, it is parsed into Go types (string, number, bool, list, map).
+// Otherwise, the trimmed string output is returned.
+//
+// Parameters:
+//   - script: The ExecScript AST node containing command and arguments
+//
+// Returns:
+//   - interface{}: The script output as string (trimmed) or parsed JSON value
+func (e *Evaluator) evalExecScript(script *ExecScript) interface{} {
+	// Evaluate the command (first argument)
+	cmdValue := e.Eval(script.Command)
+	cmdStr, ok := cmdValue.(string)
+	if !ok || cmdStr == "" {
+		return ""
+	}
+
+	// Build the command with arguments
+	args := make([]string, 0, len(script.Args))
+	for _, arg := range script.Args {
+		argValue := e.Eval(arg)
+		if argStr, ok := argValue.(string); ok {
+			args = append(args, argStr)
+		}
+	}
+
+	// Execute the script
+	cmd := exec.Command(cmdStr, args...)
+	output, err := cmd.Output()
+	if err != nil {
+		// Return error as string for now (caller can check)
+		return fmt.Sprintf("exec_script error: %v", err)
+	}
+
+	// Trim the output
+	result := strings.TrimSpace(string(output))
+
+	// Try to parse as JSON
+	var jsonValue interface{}
+	if json.Unmarshal([]byte(result), &jsonValue) == nil {
+		return jsonValue
+	}
+
+	// Return as plain string if not valid JSON
+	return result
 }
 
 // isDefaultPattern checks if a pattern is the "default" pattern.

@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"minibp/lib/parser"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -288,8 +289,26 @@ func (r *ccLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 		return ""
 	}
 
+	variants := getGoTargetVariants(m)
+	if len(variants) == 0 {
+		return r.ninjaEdgeForVariant(m, ctx, "")
+	}
+
+	var edges strings.Builder
+	sorted := make([]string, len(variants))
+	copy(sorted, variants)
+	sort.Strings(sorted)
+	for _, v := range sorted {
+		edges.WriteString(r.ninjaEdgeForVariant(m, ctx, v))
+	}
+	return edges.String()
+}
+
+func (r *ccLibrary) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext, variant string) string {
+	name := getName(m)
+	srcs := getSrcs(m)
+
 	compilerType := detectCompilerType(srcs)
-	compiler := ccCompilerCmd(ctx, compilerType)
 	shared := getBoolProp(m, "shared")
 	moduleLto := getLto(m)
 	if moduleLto == "" {
@@ -304,11 +323,51 @@ func (r *ccLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	archiveRule := "cc_archive"
 	sharedRule := "cc_shared"
 
+	// Use variant-specific toolchain if available
+	cc := ctx.CC
+	cxx := ctx.CXX
+	sysroot := ctx.Sysroot
+	if variant != "" {
+		if v := getGoTargetProp(m, variant, "cc"); v != "" {
+			cc = v
+		}
+		if v := getGoTargetProp(m, variant, "cxx"); v != "" {
+			cxx = v
+		}
+		if v := getGoTargetProp(m, variant, "sysroot"); v != "" {
+			sysroot = v
+		}
+	}
+
+	compiler := cc
+	if compilerType == "cpp" {
+		compiler = cxx
+	}
+	if ctx.Ccache != "" {
+		compiler = ctx.Ccache + " " + compiler
+	}
+
+	// Build flags
 	cflags := joinFlags(ctx.CFlags, getCflags(m), getCppflags(m))
+	if variant != "" {
+		if v := getGoTargetProp(m, variant, "cflags"); v != "" {
+			cflags = joinFlags(cflags, v)
+		}
+	}
 	if ltoCompileExtra != "" {
 		cflags = strings.TrimSpace(cflags + " " + ltoCompileExtra)
 	}
+	// Add sysroot to flags if specified
+	if sysroot != "" {
+		cflags = strings.TrimSpace(cflags + " --sysroot=" + sysroot)
+	}
+
 	ldflags := joinFlags(ctx.LdFlags, getLdflags(m))
+	if variant != "" {
+		if v := getGoTargetProp(m, variant, "ldflags"); v != "" {
+			ldflags = joinFlags(ldflags, v)
+		}
+	}
 
 	var sharedInputs []string
 	sharedLibs := GetListProp(m, "shared_libs")
@@ -1035,31 +1094,89 @@ func (r *ccBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 func (r *ccBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
-	deps := GetListProp(m, "deps")
-	sharedLibs := GetListProp(m, "shared_libs")
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
 
+	variants := getGoTargetVariants(m)
+	if len(variants) == 0 {
+		return r.ninjaEdgeForVariant(m, ctx, "")
+	}
+
+	var edges strings.Builder
+	sorted := make([]string, len(variants))
+	copy(sorted, variants)
+	sort.Strings(sorted)
+	for _, v := range sorted {
+		edges.WriteString(r.ninjaEdgeForVariant(m, ctx, v))
+	}
+	return edges.String()
+}
+
+func (r *ccBinary) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext, variant string) string {
+	name := getName(m)
+	srcs := getSrcs(m)
+	deps := GetListProp(m, "deps")
+	sharedLibs := GetListProp(m, "shared_libs")
+
 	compilerType := detectCompilerType(srcs)
-	compiler := ccCompilerCmd(ctx, compilerType)
 
 	moduleLto := getLto(m)
 	if moduleLto == "" {
 		moduleLto = ctx.Lto
 	}
+
 	ltoCompileExtra, _ := ltoFlags(moduleLto)
 	compileRule := "cc_compile"
 	if moduleLto != "" {
 		compileRule = "cc_compile_lto"
 	}
 
+	// Use variant-specific toolchain if available
+	cc := ctx.CC
+	cxx := ctx.CXX
+	sysroot := ctx.Sysroot
+	if variant != "" {
+		if v := getGoTargetProp(m, variant, "cc"); v != "" {
+			cc = v
+		}
+		if v := getGoTargetProp(m, variant, "cxx"); v != "" {
+			cxx = v
+		}
+		if v := getGoTargetProp(m, variant, "sysroot"); v != "" {
+			sysroot = v
+		}
+	}
+
+	compiler := cc
+	if compilerType == "cpp" {
+		compiler = cxx
+	}
+	if ctx.Ccache != "" {
+		compiler = ctx.Ccache + " " + compiler
+	}
+
+	// Build flags
 	cflags := joinFlags(ctx.CFlags, getCflags(m), getCppflags(m))
+	if variant != "" {
+		if v := getGoTargetProp(m, variant, "cflags"); v != "" {
+			cflags = joinFlags(cflags, v)
+		}
+	}
 	if ltoCompileExtra != "" {
 		cflags = strings.TrimSpace(cflags + " " + ltoCompileExtra)
 	}
+	// Add sysroot to flags if specified
+	if sysroot != "" {
+		cflags = strings.TrimSpace(cflags + " --sysroot=" + sysroot)
+	}
+
 	ldflags := joinFlags(ctx.LdFlags, getLdflags(m))
-	linkFlags := ldflags
+	if variant != "" {
+		if v := getGoTargetProp(m, variant, "ldflags"); v != "" {
+			ldflags = joinFlags(ldflags, v)
+		}
+	}
 
 	var libFiles []string
 	for _, dep := range deps {
@@ -1069,11 +1186,12 @@ func (r *ccBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	for _, dep := range sharedLibs {
 		depName := strings.TrimPrefix(dep, ":")
 		libFiles = append(libFiles, sharedLibOutputName(depName, ctx.ArchSuffix))
-		linkFlags = joinFlags(linkFlags, "-l"+depName)
+		ldflags = joinFlags(ldflags, "-l"+depName)
 	}
 
 	var edges strings.Builder
 	var objFiles []string
+
 	for _, src := range srcs {
 		obj := objectOutputName(name, src)
 		objFiles = append(objFiles, obj)
@@ -1087,7 +1205,7 @@ func (r *ccBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	if moduleLto != "" {
 		linkRule = "cc_link_lto"
 	}
-	edges.WriteString(fmt.Sprintf("build %s: %s %s\n flags = %s\n CC = %s\n", out, linkRule, strings.Join(allInputs, " "), linkFlags, compiler))
+	edges.WriteString(fmt.Sprintf("build %s: %s %s\n flags = %s\n CC = %s\n", out, linkRule, strings.Join(allInputs, " "), ldflags, compiler))
 
 	if moduleLto == "thin" {
 		for _, src := range srcs {

@@ -344,6 +344,30 @@ func (u *Unset) Pos() scanner.Position { return u.KeywordPos }
 // String returns "unset".
 func (u *Unset) String() string { return "unset" }
 
+// ExecScript represents an exec_script() call for running scripts during configuration.
+// The script is executed during Blueprint parsing/evaluation phase (not ninja build phase),
+// and its output (stdout) is captured and used as the expression value.
+// Supports JSON parsing for structured output.
+//
+// Usage in Blueprint:
+//
+//	value = exec_script("detect_arch.sh")
+//	cflags: ["-DARCH=" + exec_script("get_flag.sh", "arg1")]
+//
+// The output is trimmed. If the output is valid JSON, it can be parsed into
+// structured data (string, number, boolean, list, map).
+type ExecScript struct {
+	KeywordPos scanner.Position // Position of "exec_script" keyword
+	Command    Expression       // Script path/command (string expression)
+	Args       []Expression     // Arguments to the script (list of string expressions)
+}
+
+// Pos returns the position of the exec_script keyword.
+func (e *ExecScript) Pos() scanner.Position { return e.KeywordPos }
+
+// String returns "exec_script" as the representation.
+func (e *ExecScript) String() string { return "exec_script" }
+
 // File represents a parsed Blueprint file.
 // It contains a list of definitions (modules and assignments) found
 // at the top level of the file.

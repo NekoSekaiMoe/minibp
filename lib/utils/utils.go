@@ -310,7 +310,7 @@ func GetVersion() string {
 	}
 	buildDate := v.BuildDate
 	if buildDate == "unknown" {
-			buildDate = time.Now().Format("2006-01-02")
+		buildDate = time.Now().Format("2006-01-02")
 	}
 	return fmt.Sprintf("%s (git: %s, built: %s, go: %s)", v.MinibpVer, gitCommit, buildDate, v.GoVersion)
 }

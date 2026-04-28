@@ -632,9 +632,12 @@ func (p *Parser) parsePrimary() (Expression, error) {
 	case LBRACE:
 		return p.parseMap()
 	case IDENT:
-		// Check for select() keyword vs variable reference
+		// Check for select() or exec_script() keyword vs variable reference
 		if p.curToken.Literal == "select" {
 			return p.parseSelect()
+		}
+		if p.curToken.Literal == "exec_script" {
+			return p.parseExecScript()
 		}
 		return p.parseVariable()
 	case UNSET:
@@ -942,6 +945,71 @@ func (p *Parser) parseSelect() (*Select, error) {
 		LBracePos:  lbracePos,
 		RBracePos:  rbracePos,
 		Cases:      cases,
+	}, nil
+}
+
+// parseExecScript parses an exec_script() call for running scripts during configuration.
+// The script is executed during Blueprint parsing/evaluation, not during ninja build.
+// Supports an optional list of arguments.
+//
+// Grammar:
+//
+//	exec_script -> "exec_script" LPAREN expression [COMMA expression_list] RPAREN
+//
+// Examples:
+//
+//	exec_script("detect_arch.sh")
+//	exec_script("get_flag.sh", "arg1", "arg2")
+//
+// Returns:
+//   - *ExecScript: The parsed exec_script AST node
+//   - error: nil if successful, otherwise a parse error
+func (p *Parser) parseExecScript() (*ExecScript, error) {
+	keywordPos := p.curToken.Pos
+	p.nextToken()
+
+	// Expect opening parenthesis
+	if p.curToken.Type != LPAREN {
+		return nil, errors.Syntax("expected '(' after 'exec_script'").
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithSuggestion("exec_script() requires parentheses")
+	}
+	p.nextToken()
+
+	// Parse the command (first argument, required)
+	command, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse optional arguments (comma-separated expressions)
+	args := []Expression{}
+	if p.curToken.Type == COMMA {
+		p.nextToken()
+		for p.curToken.Type != EOF && p.curToken.Type != RPAREN {
+			arg, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, arg)
+			if p.curToken.Type == COMMA {
+				p.nextToken()
+			}
+		}
+	}
+
+	// Expect closing parenthesis
+	if p.curToken.Type != RPAREN {
+		return nil, errors.Syntax("expected ')' after exec_script arguments").
+			WithLocation(p.fileName, p.curToken.Pos.Line, p.curToken.Pos.Column).
+			WithSuggestion("exec_script() must end with ')'")
+	}
+	p.nextToken()
+
+	return &ExecScript{
+		KeywordPos: keywordPos,
+		Command:    command,
+		Args:       args,
 	}, nil
 }
 
