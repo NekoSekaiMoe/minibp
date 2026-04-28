@@ -169,16 +169,23 @@ func (r *goLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	}
 
 	variants := getGoTargetVariants(m)
+
+	// Always generate host build first (no variant)
+	goos, goarch, isCrossCompile := goosAndArch(ctx)
+	if !isCrossCompile {
+		goos = ""
+		goarch = ""
+	}
+	hostEdge := r.ninjaEdgeForVariant(m, ctx, goos, goarch)
+
 	if len(variants) == 0 {
-		goos, goarch, isCrossCompile := goosAndArch(ctx)
-		if !isCrossCompile {
-			goos = ""
-			goarch = ""
-		}
-		return r.ninjaEdgeForVariant(m, ctx, goos, goarch)
+		return hostEdge
 	}
 
+	// Add host build first, then variant builds
 	var edges strings.Builder
+	edges.WriteString(hostEdge)
+
 	sorted := make([]string, len(variants))
 	copy(sorted, variants)
 	sort.Strings(sorted)
@@ -286,7 +293,10 @@ func (r *goBinary) Name() string { return "go_binary" }
 //   - These rules don't use toolchain context (always uses system Go toolchain)
 //   - GOOS_GOARCH variable is set per-variant in NinjaEdge
 func (r *goBinary) NinjaRule(ctx RuleRenderContext) string {
-	return `rule go_build_archive
+	return `rule go_build
+  command = $cmd
+
+rule go_build_archive
   command = $cmd
 
 rule go_write_importcfg
@@ -314,7 +324,7 @@ rule go_link
 // Edge cases:
 //   - Empty name: Returns nil (cannot determine output path)
 //   - No cross-compilation: Returns "{name}" without suffix
-//   - Cross-compilation: Returns "{name}_{goos}_{goarch}" with context values
+//   - Cross-compilation: Returns both ["{name}_{host_os}_{host_arch}", "{name}_{target_os}_{target_arch}"]
 func (r *goBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	name := getName(m)
 	if name == "" {
@@ -324,7 +334,10 @@ func (r *goBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 	if !isCrossCompile {
 		return []string{name}
 	}
-	return []string{fmt.Sprintf("%s_%s_%s", name, goos, goarch)}
+	// Return both host and target outputs
+	hostOutput := fmt.Sprintf("%s_%s_%s", name, runtime.GOOS, runtime.GOARCH)
+	targetOutput := fmt.Sprintf("%s_%s_%s", name, goos, goarch)
+	return []string{hostOutput, targetOutput}
 }
 
 // NinjaEdge generates ninja build edges for Go binary compilation and linking.
@@ -362,28 +375,76 @@ func (r *goBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	}
 
 	variants := getGoTargetVariants(m)
-	if len(variants) == 0 {
-		goos, goarch, isCrossCompile := goosAndArch(ctx)
-		if !isCrossCompile {
-			goos = ""
-			goarch = ""
-		}
-		return r.ninjaEdgeForVariant(m, ctx, goos, goarch)
+	_, _, isCrossCompile := goosAndArch(ctx)
+	
+	// Always generate host build first (using runtime platform)
+	hostSuffix := "_" + runtime.GOOS + "_" + runtime.GOARCH
+	hostEdge := r.buildGoBuild(m, ctx, name, srcs, hostSuffix)
+	
+	// If no explicit variants and no cross-compile context, just use simple build without suffix
+	if len(variants) == 0 && !isCrossCompile {
+		return r.buildGoBuild(m, ctx, name, srcs, "")
 	}
 
+	// If cross-compiling or has variants, include both host and target builds
+	if len(variants) == 0 {
+		// No explicit variants but cross-compiling - generate target build too
+		var edges strings.Builder
+		edges.WriteString(hostEdge)
+		edges.WriteString(r.buildCrossCompile(m, ctx, name, srcs, ctx.GOOS, ctx.GOARCH))
+		return edges.String()
+	}
+
+	// Has explicit variants - generate host + variants
 	var edges strings.Builder
+	edges.WriteString(hostEdge)
+
 	sorted := make([]string, len(variants))
 	copy(sorted, variants)
 	sort.Strings(sorted)
 	for _, v := range sorted {
 		goos := getGoTargetProp(m, v, "goos")
 		goarch := getGoTargetProp(m, v, "goarch")
-		edges.WriteString(r.ninjaEdgeForVariant(m, ctx, goos, goarch))
+		edges.WriteString(r.buildCrossCompile(m, ctx, name, srcs, goos, goarch))
 	}
 	return edges.String()
 }
 
-// ninjaEdgeForVariant generates build edges for a specific Go binary variant.
+// buildGoBuild generates native Go binary build using regular go build
+func (r *goBinary) buildGoBuild(m *parser.Module, ctx RuleRenderContext, name string, srcs []string, suffix string) string {
+	goflags := GetListProp(m, "goflags")
+	ldflags := GetListProp(m, "ldflags")
+	pkg := goPackageArg(m, ctx)
+	sourceInputs := goSourceInputs(srcs, ctx.PathPrefix)
+	
+	outName := name + suffix
+
+	var edges strings.Builder
+	edges.WriteString(fmt.Sprintf("build %s: go_build %s\n cmd = %s\n GOOS_GOARCH = \n",
+		outName,
+		strings.Join(sourceInputs, " "),
+		goBuildCmd("", goflags, ldflags, "", outName, pkg)))
+	return edges.String()
+}
+
+// buildCrossCompile generates cross-compiled Go binary build with GOOS/GOARCH
+func (r *goBinary) buildCrossCompile(m *parser.Module, ctx RuleRenderContext, name string, srcs []string, goos, goarch string) string {
+	goflags := GetListProp(m, "goflags")
+	ldflags := GetListProp(m, "ldflags")
+
+	envVar, suffix, _, _ := goVariantEnvVars(goos, goarch)
+	out := name + suffix
+	pkg := goPackageArg(m, ctx)
+	sourceInputs := goSourceInputs(srcs, ctx.PathPrefix)
+
+	var edges strings.Builder
+	edges.WriteString(fmt.Sprintf("build %s: go_build %s\n cmd = %s\n GOOS_GOARCH = %s\n",
+		out,
+		strings.Join(sourceInputs, " "),
+		goBuildCmd(envVar, goflags, ldflags, "", out, pkg),
+		envVar))
+	return edges.String()
+}
 //
 // Uses the importcfg-based linking approach (per tasks.md):
 //  1. Compile main package to .a (go build -buildmode=archive)

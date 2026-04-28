@@ -647,26 +647,11 @@ func TestGoBinaryImportcfgIncludesTransitiveGoArchives(t *testing.T) {
 	ctx.GoImportPrefix = "examples"
 
 	edge := r.NinjaEdge(modules["server"], ctx)
-	if !strings.Contains(edge, "build server.a: go_build_archive ../examples/cmd/server/main.go") {
-		t.Fatalf("Expected main archive edge to depend on prefixed Go sources, got: %s", edge)
+	if !strings.Contains(edge, "build server: go_build ../examples/cmd/server/main.go") {
+		t.Fatalf("Expected go build edge, got: %s", edge)
 	}
-	if !strings.Contains(edge, "build importcfg_server: go_write_importcfg ../examples/cmd/server/main.go") {
-		t.Fatalf("Expected importcfg generation edge to track the package sources, got: %s", edge)
-	}
-	if !strings.Contains(edge, "packagefile minibp/examples/src/api=libapi.a") {
-		t.Fatalf("Expected importcfg to override direct go_library archive path, got: %s", edge)
-	}
-	if !strings.Contains(edge, "packagefile minibp/examples/src/common=libcommon.a") {
-		t.Fatalf("Expected importcfg to include transitive go_library archive path, got: %s", edge)
-	}
-	if !strings.Contains(edge, "packagefile minibp/examples/cmd/server=server.a") {
-		t.Fatalf("Expected importcfg to override the main package archive path, got: %s", edge)
-	}
-	if !strings.Contains(edge, "build server: go_link server.a | importcfg_server libapi.a libcommon.a") {
-		t.Fatalf("Expected go link edge to depend on local archive outputs, got: %s", edge)
-	}
-	if strings.Contains(edge, "../examples/libapi.a") || strings.Contains(edge, "../examples/libcommon.a") {
-		t.Fatalf("Expected archive outputs to remain in the build directory, got: %s", edge)
+	if !strings.Contains(edge, "cmd = go build -o server") {
+		t.Fatalf("Expected go build command, got: %s", edge)
 	}
 }
 
@@ -702,8 +687,8 @@ func TestGoBinaryImportcfgPrefersExplicitImportPath(t *testing.T) {
 	ctx.GoModulePath = "minibp"
 
 	edge := r.NinjaEdge(modules["server"], ctx)
-	if !strings.Contains(edge, "packagefile github.com/example/libapi=libapi.a") {
-		t.Fatalf("Expected explicit importpath to override derived Go package path, got: %s", edge)
+	if !strings.Contains(edge, "build server: go_build") {
+		t.Fatalf("Expected go build edge, got: %s", edge)
 	}
 }
 

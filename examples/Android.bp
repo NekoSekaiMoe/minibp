@@ -146,6 +146,20 @@ cc_binary {
 go_library {
     name: "libapi",
     srcs: ["src/api.go", "src/types.go"],
+    target: {
+        darwin_amd64: {
+            goos: "darwin",
+            goarch: "amd64",
+        },
+        linux_amd64: {
+            goos: "linux",
+            goarch: "amd64",
+        },
+        windows_arm64: {
+            goos: "windows",
+            goarch: "arm64",
+        },
+    },
 }
 
 // Go binary executable
@@ -155,6 +169,21 @@ go_binary {
     deps: [
         ":libapi",
     ],
+}
+
+// Go binary with cross-compilation target
+go_binary {
+    name: "server_darwin",
+    srcs: ["cmd/server/main.go"],
+    deps: [
+        ":libapi",
+    ],
+    target: {
+        darwin_amd64: {
+            goos: "darwin",
+            goarch: "amd64",
+        },
+    },
 }
 
 // ============================================================================

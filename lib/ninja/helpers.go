@@ -294,10 +294,18 @@ func getGoTargetVariants(m *parser.Module) []string {
 	}
 	var keys []string
 	for _, p := range m.Target.Properties {
-		if _, ok := p.Value.(*parser.Map); !ok {
-			continue
+		// Check if the property appears to be a variant (has a name that's a known variant pattern)
+		// and has some value (non-nil)
+		if p.Value != nil {
+			if _, ok := p.Value.(*parser.Map); ok {
+				keys = append(keys, p.Name)
+			}
+		} else {
+			// If value is nil, still check the Name - might be a variant
+			if p.Name != "" {
+				keys = append(keys, p.Name)
+			}
 		}
-		keys = append(keys, p.Name)
 	}
 	return keys
 }
@@ -323,6 +331,19 @@ func getGoTargetProp(m *parser.Module, variant, prop string) string {
 	for _, p := range m.Target.Properties {
 		if p.Name != variant {
 			continue
+		}
+		// If value is nil, parse from variant name (e.g., "darwin_amd64" -> goos="darwin", goarch="amd64")
+		if p.Value == nil {
+			parts := strings.Split(variant, "_")
+			if len(parts) >= 2 {
+				if prop == "goos" {
+					return parts[0]
+				}
+				if prop == "goarch" {
+					return parts[1]
+				}
+			}
+			return ""
 		}
 		sub, ok := p.Value.(*parser.Map)
 		if !ok {
