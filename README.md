@@ -45,6 +45,8 @@ A minimal Android.bp (Blueprint) parser and Ninja build file generator written i
 
 - **Duplicate rule handling**: Avoids duplicate ninja rule definitions
 
+- **exec_script() extension** (minibp-specific, not standard Soong): Run external scripts during Blueprint parsing/evaluation phase. Captures stdout as expression value, with automatic JSON parsing for structured output.
+
 ## Usage
 
 ```bash
@@ -158,7 +160,13 @@ soong_namespace {
 }
 
 # //vendor:lib resolves via namespace
+
+# exec_script() — minibp extension, runs at parse time
+value = exec_script("detect_arch.sh")
+cflags: ["-DARCH=" + exec_script("get_flag.sh", "arg1")]
 ```
+
+> **Note**: `exec_script()` is a minibp-specific extension, not part of standard Soong/Blueprint syntax. The script runs during parsing, and its stdout (trimmed, with optional JSON parsing) becomes the expression value.
 
 ## Building
 
