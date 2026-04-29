@@ -383,11 +383,11 @@ func (r *goBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	variants := getGoTargetVariants(m)
 	_, _, isCrossCompile := goosAndArch(ctx)
-	
+
 	// Always generate host build first (using runtime platform)
 	hostSuffix := "_" + runtime.GOOS + "_" + runtime.GOARCH
 	hostEdge := r.buildGoBuild(m, ctx, name, srcs, hostSuffix)
-	
+
 	// If no explicit variants and no cross-compile context, just use simple build without suffix
 	if len(variants) == 0 && !isCrossCompile {
 		return r.buildGoBuild(m, ctx, name, srcs, "")
@@ -423,7 +423,7 @@ func (r *goBinary) buildGoBuild(m *parser.Module, ctx RuleRenderContext, name st
 	ldflags := GetListProp(m, "ldflags")
 	pkg := goPackageArg(m, ctx)
 	sourceInputs := goSourceInputs(srcs, ctx.PathPrefix)
-	
+
 	outName := name + suffix
 
 	var edges strings.Builder
@@ -455,7 +455,7 @@ func (r *goBinary) buildCrossCompile(m *parser.Module, ctx RuleRenderContext, na
 		envVar))
 	return edges.String()
 }
-//
+
 // Uses the importcfg-based linking approach (per tasks.md):
 //  1. Compile main package to .a (go build -buildmode=archive)
 //  2. Generate importcfg file with all dependency mappings
@@ -673,14 +673,14 @@ func (r *goTest) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 
 	variants := getGoTargetVariants(m)
 	_, _, isCrossCompile := goosAndArch(ctx)
-	
+
 	// Generate host build first (using runtime platform)
 	hostSuffix := "_" + runtime.GOOS + "_" + runtime.GOARCH
 	if runtime.GOOS == "windows" {
 		hostSuffix += ".exe"
 	}
 	hostEdge := r.ninjaEdgeForVariant(m, ctx, runtime.GOOS, runtime.GOARCH)
-	
+
 	// If no explicit variants and no cross-compile context, just use simple build without suffix
 	if len(variants) == 0 && !isCrossCompile {
 		return r.ninjaEdgeForVariant(m, ctx, "", "")
@@ -752,12 +752,12 @@ func (r *goTest) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext, go
 
 	envVar, suffix, _, _ := goVariantEnvVars(goos, goarch)
 	out := fmt.Sprintf("%s%s.test", name, suffix)
-	
+
 	// For windows, test executables need .exe in the command line
 	if goos == "windows" {
 		out = name + suffix + ".test.exe"
 	}
-	
+
 	cmd := goTestCmd(envVar, goflags, ldflags, out, goPackageArg(m, ctx))
 
 	return fmt.Sprintf("build %s: go_test %s\n cmd = %s\n GOOS_GOARCH = %s\n",

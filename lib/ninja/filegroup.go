@@ -304,11 +304,12 @@ func (r *filegroup) Desc(m *parser.Module, srcFile string) string {
 // they appear in the "srcs" property.
 //
 // Example:
-//   filegroup_static {
-//       name: "my_bundle",
-//       srcs: ["header.txt", "body.txt", "footer.txt"],
-//   }
-//   Produces: my_bundle.static (containing header.txt + body.txt + footer.txt)
+//
+//	filegroup_static {
+//	    name: "my_bundle",
+//	    srcs: ["header.txt", "body.txt", "footer.txt"],
+//	}
+//	Produces: my_bundle.static (containing header.txt + body.txt + footer.txt)
 //
 // Algorithm:
 //  1. Get module name from the "name" property
@@ -330,7 +331,7 @@ func (r *filegroup) Desc(m *parser.Module, srcFile string) string {
 //     This is simpler than per-file edges but means any source change rebuilds the entire bundle.
 //   - The current NinjaRule uses "cp $in $out" which may not correctly concatenate files.
 //     (Note: This appears to be a known limitation - cp typically doesn't concatenate;
-//      a custom command or using "cat" might be more appropriate for Unix systems.)
+//     a custom command or using "cat" might be more appropriate for Unix systems.)
 type filegroupStatic struct{}
 
 // Name returns the unique identifier for the filegroup_static build rule.
@@ -349,6 +350,7 @@ func (r *filegroupStatic) Name() string { return "filegroup_static" }
 // when given multiple inputs. The correct command for concatenation would be:
 //   - Unix: "cat $in > $out" or "cat $in $out && mv $out.tmp $out"
 //   - Windows: "type $in > $out"
+//
 // This appears to be a known issue that may need to be addressed in future versions.
 //
 // Parameters:

@@ -68,9 +68,9 @@ import (
 // Returns:
 //   - The string value if the property is found and is of type *parser.String.
 //   - Empty string ("") if:
-//     - The module is nil or has no property map
-//     - No property with the given name exists
-//     - The property exists but is not a string type (e.g., it's a list or map)
+//   - The module is nil or has no property map
+//   - No property with the given name exists
+//   - The property exists but is not a string type (e.g., it's a list or map)
 //
 // Edge cases:
 //   - Returns empty string (not an error) when property type doesn't match.
@@ -129,9 +129,9 @@ func GetStringProp(m *parser.Module, name string) string {
 //   - The string value with variables resolved if eval is non-nil.
 //   - The raw string value if eval is nil and property is found.
 //   - Empty string ("") if:
-//     - The module is nil or has no property map
-//     - No property with the given name exists
-//     - The property exists but is not a string type
+//   - The module is nil or has no property map
+//   - No property with the given name exists
+//   - The property exists but is not a string type
 //
 // Edge cases:
 //   - If eval is provided but the string contains no variable references,
@@ -182,10 +182,10 @@ func GetStringPropEval(m *parser.Module, name string, eval *parser.Evaluator) st
 // Returns:
 //   - true if the property is found and is of type *parser.Bool with value true.
 //   - false if:
-//     - The module is nil or has no property map
-//     - No property with the given name exists
-//     - The property exists but is not a boolean type
-//     - The property is a boolean with value false
+//   - The module is nil or has no property map
+//   - No property with the given name exists
+//   - The property exists but is not a boolean type
+//   - The property is a boolean with value false
 //
 // Edge cases:
 //   - Returns false (not an error) when property type doesn't match.
@@ -238,9 +238,9 @@ func getBoolProp(m *parser.Module, name string) bool {
 //   - A slice of string values if the property is found and is a list type.
 //     Only string elements are included; other types are silently ignored.
 //     Returns nil (not an empty slice) if:
-//     - The module is nil or has no property map
-//     - No property with the given name exists
-//     - The property exists but is not a list type
+//   - The module is nil or has no property map
+//   - No property with the given name exists
+//   - The property exists but is not a list type
 //
 // Edge cases:
 //   - Returns nil (not []string{}) when property not found.
@@ -304,9 +304,9 @@ func GetListProp(m *parser.Module, name string) []string {
 //   - A slice of string values with variables resolved if eval is non-nil.
 //   - Raw string values if eval is nil and property is found.
 //   - nil (not an empty slice) if:
-//     - The module is nil or has no property map
-//     - No property with the given name exists
-//     - The property exists but is not a list type
+//   - The module is nil or has no property map
+//   - No property with the given name exists
+//   - The property exists but is not a list type
 //
 // Edge cases:
 //   - Non-string elements in the list are silently dropped (same as GetListProp).
@@ -365,10 +365,10 @@ func GetListPropEval(m *parser.Module, name string, eval *parser.Evaluator) []st
 // Returns:
 //   - A space-separated string of all C flags.
 //   - Empty string ("") if:
-//     - The module is nil or has no property map
-//     - No "cflags" property exists
-//     - The "cflags" property is not a list type
-//     - The "cflags" list is empty
+//   - The module is nil or has no property map
+//   - No "cflags" property exists
+//   - The "cflags" property is not a list type
+//   - The "cflags" list is empty
 //
 // Edge cases:
 //   - Returns empty string (not nil) since the return type is string.
@@ -496,9 +496,9 @@ func getGoflags(m *parser.Module) string {
 // Returns:
 //   - The LTO mode string as specified in the module's "lto" property.
 //   - Empty string ("") if:
-//     - The module is nil or has no property map
-//     - No "lto" property exists
-//     - The "lto" property is not a string type
+//   - The module is nil or has no property map
+//   - No "lto" property exists
+//   - The "lto" property is not a string type
 //
 // Edge cases:
 //   - The caller is responsible for interpreting the mode string.
@@ -530,9 +530,9 @@ func getLto(m *parser.Module) string {
 // Returns:
 //   - A slice of local include directory paths from the "local_include_dirs" property.
 //   - nil (not an empty slice) if:
-//     - The module is nil or has no property map
-//     - No "local_include_dirs" property exists
-//     - The property exists but is not a list type
+//   - The module is nil or has no property map
+//   - No "local_include_dirs" property exists
+//   - The property exists but is not a list type
 //
 // Edge cases:
 //   - Non-string elements in the list are silently dropped.
@@ -601,8 +601,8 @@ func getSystemIncludeDirs(m *parser.Module) []string {
 // Returns:
 //   - A slice of target variant keys (e.g., ["linux_amd64", "darwin_arm64"]).
 //   - nil (not an empty slice) if:
-//     - The module is nil or has no Target section
-//     - No variant properties are found
+//   - The module is nil or has no Target section
+//   - No variant properties are found
 //
 // Edge cases:
 //   - Properties with nil values but valid names are treated as potential variants.
@@ -673,11 +673,11 @@ func getGoTargetVariants(m *parser.Module) []string {
 //   - For "goos" property: the OS part from the variant name (e.g., "linux" from "linux_amd64").
 //   - For "goarch" property: the architecture part from the variant name (e.g., "amd64" from "linux_amd64").
 //   - Empty string ("") if:
-//     - The module is nil or has no Target section
-//     - No variant with the given name exists
-//     - The variant exists but the property is not found
-//     - The property exists but is not a string type
-//     - Variant name doesn't have at least 2 parts for goos/goarch inference
+//   - The module is nil or has no Target section
+//   - No variant with the given name exists
+//   - The variant exists but the property is not found
+//   - The property exists but is not a string type
+//   - Variant name doesn't have at least 2 parts for goos/goarch inference
 //
 // Edge cases:
 //   - If the variant has a nil value, only "goos" and "goarch" can be inferred.
@@ -792,9 +792,9 @@ func getJavaflags(m *parser.Module) string {
 // Returns:
 //   - A slice of exported include directory paths from "export_include_dirs" property.
 //   - nil (not an empty slice) if:
-//     - The module is nil or has no property map
-//     - No "export_include_dirs" property exists
-//     - The property exists but is not a list type
+//   - The module is nil or has no property map
+//   - No "export_include_dirs" property exists
+//   - The property exists but is not a list type
 //
 // Edge cases:
 //   - Non-string elements in the list are silently dropped.
@@ -829,9 +829,9 @@ func getExportIncludeDirs(m *parser.Module) []string {
 // Returns:
 //   - A slice of exported header file paths from "exported_headers" property.
 //   - nil (not an empty slice) if:
-//     - The module is nil or has no property map
-//     - No "exported_headers" property exists
-//     - The property exists but is not a list type
+//   - The module is nil or has no property map
+//   - No "exported_headers" property exists
+//   - The property exists but is not a list type
 //
 // Edge cases:
 //   - Non-string elements in the list are silently dropped.
@@ -861,9 +861,9 @@ func getExportedHeaders(m *parser.Module) []string {
 // Returns:
 //   - The module name string from the "name" property.
 //   - Empty string ("") if:
-//     - The module is nil or has no property map
-//     - No "name" property exists
-//     - The "name" property is not a string type
+//   - The module is nil or has no property map
+//   - No "name" property exists
+//   - The "name" property is not a string type
 //
 // Edge cases:
 //   - Returns empty string (not an error) when name is missing or wrong type.
@@ -893,9 +893,9 @@ func getName(m *parser.Module) string {
 // Returns:
 //   - A slice of source file paths from the "srcs" property.
 //   - nil (not an empty slice) if:
-//     - The module is nil or has no property map
-//     - No "srcs" property exists
-//     - The property exists but is not a list type
+//   - The module is nil or has no property map
+//   - No "srcs" property exists
+//   - The property exists but is not a list type
 //
 // Edge cases:
 //   - Non-string elements in the list are silently dropped.
@@ -1188,10 +1188,10 @@ func staticLibOutputName(name string, archSuffix string) string {
 // Returns:
 //   - The first source file path from the "srcs" property.
 //   - Empty string ("") if:
-//     - The module is nil or has no property map
-//     - No "srcs" property exists
-//     - The "srcs" property is not a list type
-//     - The "srcs" list is empty
+//   - The module is nil or has no property map
+//   - No "srcs" property exists
+//   - The "srcs" property is not a list type
+//   - The "srcs" list is empty
 //
 // Edge cases:
 //   - Returns empty string (not an error) when no sources are available.
@@ -1228,9 +1228,9 @@ func getFirstSource(m *parser.Module) string {
 // Returns:
 //   - A slice of data file paths from the "data" property.
 //   - nil (not an empty slice) if:
-//     - The module is nil or has no property map
-//     - No "data" property exists
-//     - The property exists but is not a list type
+//   - The module is nil or has no property map
+//   - No "data" property exists
+//   - The property exists but is not a list type
 //
 // Edge cases:
 //   - Non-string elements in the list are silently dropped.
@@ -1263,8 +1263,8 @@ func getData(m *parser.Module) []string {
 // Returns:
 //   - A command string suitable for use in a Ninja rule's command line.
 //     Examples:
-//     - Unix: "cp $in $out"
-//     - Windows: "cmd /c copy $in $out"
+//   - Unix: "cp $in $out"
+//   - Windows: "cmd /c copy $in $out"
 //
 // Edge cases:
 //   - The returned command expects exactly one input ($in) and one output ($out).
@@ -1308,11 +1308,11 @@ func copyCommand() string {
 // Returns:
 //   - A space-separated string of all test arguments from the "args" key.
 //   - Empty string ("") if:
-//     - The module is nil or has no property map
-//     - No "test_options" property exists
-//     - The "test_options" property is not a map type
-//     - No "args" key exists in the test_options map
-//     - The "args" value is not a list or string type
+//   - The module is nil or has no property map
+//   - No "test_options" property exists
+//   - The "test_options" property is not a map type
+//   - No "args" key exists in the test_options map
+//   - The "args" value is not a list or string type
 //
 // Edge cases:
 //   - If "args" is a single string, it's wrapped in a single-element slice.
@@ -1352,9 +1352,9 @@ func getTestOptionArgs(m *parser.Module) string {
 // Returns:
 //   - A pointer to the parser.Map if the property is found and is a map type.
 //   - nil if:
-//     - The module is nil or has no property map
-//     - No property with the given name exists
-//     - The property exists but is not a map type
+//   - The module is nil or has no property map
+//   - No property with the given name exists
+//   - The property exists but is not a map type
 //
 // Edge cases:
 //   - Returns nil (not an empty map) when property not found.
@@ -1417,10 +1417,10 @@ func GetMapProp(m *parser.Module, name string) *parser.Map {
 //     For list values, all string elements are included (non-strings dropped).
 //     For single string values, returns a one-element slice.
 //   - nil (not an empty slice) if:
-//     - The map pointer is nil
-//     - No property with the given name exists in the map
-//     - The property exists but is neither a List nor a String
-//     - The property is a List but contains no string elements
+//   - The map pointer is nil
+//   - No property with the given name exists in the map
+//   - The property exists but is neither a List nor a String
+//   - The property is a List but contains no string elements
 //
 // Edge cases:
 //   - Non-string elements in a List are silently dropped.

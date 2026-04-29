@@ -75,8 +75,8 @@ import (
 //   - $out: Replaced with the primary output file (first element of outs)
 //
 // The generated ninja rule uses a two-step command construction:
-//   1. The rule definition sets up: command = $command $in $flags
-//   2. The build edge provides the actual command string via the "cmd" variable
+//  1. The rule definition sets up: command = $command $in $flags
+//  2. The build edge provides the actual command string via the "cmd" variable
 //
 // Algorithm overview for NinjaEdge:
 //  1. Validate module has name and command; return empty if missing

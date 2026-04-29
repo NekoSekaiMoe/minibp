@@ -1137,12 +1137,18 @@ func TestGeneratorAppliesToolchainFlagsToCAndCppEdges(t *testing.T) {
 		t.Fatalf("Expected cc compile flags to be excluded from link edge, got: %s", output)
 	}
 	// Check that C files use gcc compiler
-	if !strings.Contains(output, "CC = gcc\nbuild capp:") {
+	if !strings.Contains(output, "CC = gcc") {
 		t.Fatalf("Expected C binary to use gcc compiler, got: %s", output)
 	}
+	if strings.Index(output, "CC = gcc") < strings.Index(output, "build capp:") {
+		t.Fatalf("Expected CC = gcc to appear after build capp:, got: %s", output)
+	}
 	// Check that C++ files use g++ compiler
-	if !strings.Contains(output, "CC = g++\nbuild cppapp:") {
+	if !strings.Contains(output, "CC = g++") {
 		t.Fatalf("Expected C++ binary to use g++ compiler, got: %s", output)
+	}
+	if strings.Index(output, "CC = g++") < strings.Index(output, "build cppapp:") {
+		t.Fatalf("Expected CC = g++ to appear after build cppapp:, got: %s", output)
 	}
 	if !strings.Contains(output, "build cppapp_app.o: cc_compile app.cpp\n flags = -DGLOBAL -fPIC -std=c++20") {
 		t.Fatalf("Expected cc compile edge to include global cflags, module cflags, and cppflags, got: %s", output)

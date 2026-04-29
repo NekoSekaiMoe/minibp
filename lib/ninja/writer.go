@@ -179,15 +179,15 @@ func ninjaEscapePath(s string) string {
 // This prevents the shell from interpreting special characters in the string.
 //
 // The escaping strategy:
-//  1. If the string is empty, returns "''" (empty quoted string).
+//  1. If the string is empty, returns "”" (empty quoted string).
 //  2. If the string contains no special characters, returns it unchanged (fast path).
-//  3. Otherwise, wraps in single quotes and escapes internal single quotes as '\''.
+//  3. Otherwise, wraps in single quotes and escapes internal single quotes as '\”.
 //
 // Examples:
 //   - "hello world" → "'hello world'" (spaces are safe inside single quotes)
-//   - "it's a trap" → "'it'\\''s a trap'" (single quote becomes '\'')
+//   - "it's a trap" → "'it'\\”s a trap'" (single quote becomes '\”)
 //   - "file$name" → "'file$name'" (dollar is safe inside single quotes)
-//   - "" → "''" (empty string gets empty quotes)
+//   - "" → "”" (empty string gets empty quotes)
 //
 // Parameters:
 //   - s: The string to escape for shell usage.
@@ -196,7 +196,7 @@ func ninjaEscapePath(s string) string {
 //   - The shell-safe escaped string.
 //
 // Edge cases:
-//   - Empty string returns "''" to represent an empty argument.
+//   - Empty string returns "”" to represent an empty argument.
 //   - Strings without special characters are returned unchanged (zero allocation).
 //   - Already-quoted strings may be double-quoted (caller should avoid double-escaping).
 //
