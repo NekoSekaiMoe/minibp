@@ -87,6 +87,21 @@ func NewWriter(w io.Writer) *Writer {
 	return &Writer{w: w}
 }
 
+// Flush writes any buffered data to the underlying writer.
+// If the underlying writer is a *bufio.Writer (automatically added for non-buffered writers
+// in NewWriter), this calls its Flush method to persist all data. For other writer types
+// (*bytes.Buffer, *strings.Builder, pre-wrapped bufio.Writer), this is a no-op.
+//
+// You should call Flush before closing the underlying writer to ensure all generated
+// Ninja syntax is written. The 64KB buffer added in NewWriter requires flushing to empty.
+//
+// Returns:
+//   - error: nil if flush succeeded, or the error from the underlying bufio.Writer.Flush.
+//
+// Edge cases:
+//   - Non-bufio.Writer underlying writers return nil immediately.
+//   - Errors from underlying Flush are propagated without modification.
+//   - Multiple calls are safe; subsequent calls may error if the writer is closed.
 func (w *Writer) Flush() error {
 	if bw, ok := w.w.(*bufio.Writer); ok {
 		return bw.Flush()
@@ -113,6 +128,20 @@ func (w *Writer) Flush() error {
 //   - Empty strings return empty strings
 //   - Already-escaped characters are double-escaped ($$ becomes $$$$)
 //   - Does not escape spaces (use ninjaEscapePath for paths)
+//
+// Key design decisions:
+//   - Uses strings.NewReplacer via the package-level ninjaEscapeReplacer for efficiency.
+//     The replacer is created once and reused across all calls, avoiding allocation overhead.
+//   - This function does NOT escape spaces because spaces in Ninja have different meanings
+//     in different contexts (separators vs. path components). Use ninjaEscapePath for paths.
+//
+// ninjaEscapeReplacer is a pre-initialized string replacer for escaping Ninja special characters.
+// It is defined as a package-level variable to avoid re-creating the replacer on every
+// call to ninjaEscape, improving performance for frequent escape operations.
+// The replacer handles three critical Ninja escape sequences:
+//   - "$" → "$$" (escape dollar sign for literal $ in Ninja)
+//   - ":" → "$:" (escape colon which is a Ninja syntax separator)
+//   - "#" → "$#" (escape hash which starts comments in Ninja)
 var ninjaEscapeReplacer = strings.NewReplacer(
 	"$", "$$",
 	":", "$:",
@@ -148,6 +177,35 @@ func ninjaEscapePath(s string) string {
 // shellEscape escapes a string for safe inclusion in a shell command.
 // It wraps the string in single quotes and escapes any contained single quotes.
 // This prevents the shell from interpreting special characters in the string.
+//
+// The escaping strategy:
+//  1. If the string is empty, returns "''" (empty quoted string).
+//  2. If the string contains no special characters, returns it unchanged (fast path).
+//  3. Otherwise, wraps in single quotes and escapes internal single quotes as '\''.
+//
+// Examples:
+//   - "hello world" → "'hello world'" (spaces are safe inside single quotes)
+//   - "it's a trap" → "'it'\\''s a trap'" (single quote becomes '\'')
+//   - "file$name" → "'file$name'" (dollar is safe inside single quotes)
+//   - "" → "''" (empty string gets empty quotes)
+//
+// Parameters:
+//   - s: The string to escape for shell usage.
+//
+// Returns:
+//   - The shell-safe escaped string.
+//
+// Edge cases:
+//   - Empty string returns "''" to represent an empty argument.
+//   - Strings without special characters are returned unchanged (zero allocation).
+//   - Already-quoted strings may be double-quoted (caller should avoid double-escaping).
+//
+// Key design decisions:
+//   - Uses single quotes instead of double quotes because single quotes preserve
+//     all characters literally (no variable expansion, no escape sequences).
+//   - The fast-path check avoids allocating memory for safe strings.
+//   - Does not escape newlines or other control characters beyond the listed set;
+//     callers should sanitize input if needed.
 func shellEscape(s string) string {
 	if s == "" {
 		return "''"

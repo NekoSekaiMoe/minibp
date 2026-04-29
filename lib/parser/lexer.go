@@ -124,8 +124,10 @@ type Token struct {
 // of the Blueprint source code.
 type Lexer struct {
 	scanner scanner.Scanner // The underlying Go scanner - provides character scanning
-	ch      rune            // Current character being processed (cached for peeking)
-	errors  []error         // List of lexer errors encountered during scanning
+	ch      rune            // ch is the most recent rune scanned by the underlying scanner.
+	// It is cached to allow peeking (via the peek() method) and to avoid
+	// re-scanning when processing multi-character tokens.
+	errors  []error         // errors collects non-fatal lexer errors (e.g., invalid characters, malformed string literals) encountered during scanning. These errors are returned via the Errors() method for the parser to handle. Scanning continues after these errors to catch multiple issues in one pass.
 }
 
 // NewLexer creates a new lexer from an io.Reader.

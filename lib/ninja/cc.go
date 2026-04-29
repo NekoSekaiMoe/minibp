@@ -285,15 +285,21 @@ func (r *ccLibrary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 func (r *ccLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
+	// Exit early if module has no name or no source files.
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
 
+	// Check for architecture variants (e.g., host, target, arm64, x86_64).
+	// If variants exist, generate separate build edges for each variant.
 	variants := getGoTargetVariants(m)
 	if len(variants) == 0 {
+		// No variants: generate build edges for the default (empty variant).
 		return r.ninjaEdgeForVariant(m, ctx, "")
 	}
 
+	// Multiple variants: generate build edges for each variant in sorted order.
+	// Sorting ensures deterministic output regardless of map iteration order.
 	var edges strings.Builder
 	sorted := make([]string, len(variants))
 	copy(sorted, variants)
@@ -304,6 +310,37 @@ func (r *ccLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	return edges.String()
 }
 
+// ninjaEdgeForVariant generates ninja build edges for a specific variant of cc_library.
+// It compiles source files, archives or links them into the final library based on shared property.
+// Variant-specific toolchain settings (cc, cxx, sysroot, cflags) are applied if available.
+//
+// Parameters:
+//   - m: Module being evaluated (must have "name", "srcs", "shared", "shared_libs" properties)
+//   - ctx: Rule render context with toolchain and flags (CC, CXX, CFlags, LdFlags, Lto, etc.)
+//   - variant: Variant name (e.g., "host", "target_arm64"); empty for default variant
+//
+// Returns:
+//   - Ninja build edge string for the variant (compilation + archive/link edges)
+//   - Empty string if module has no name or no source files
+//
+// Build algorithm:
+//  1. Get module name and source files, exit early if missing
+//  2. Detect compiler type (C vs C++) from file extensions
+//  3. Determine LTO setting (module-level overrides context)
+//  4. Select compile rule (cc_compile or cc_compile_lto)
+//  5. Apply variant-specific toolchain (cc, cxx, sysroot) if available
+//  6. Build C/C++ flags including LTO, sysroot, variant-specific cflags
+//  7. Collect shared library dependencies (shared_libs) and add -l flags
+//  8. Generate compile edges for each source file
+//  9. Generate archive edge (cc_archive) for static or link edge (cc_shared/cc_link_lto) for shared
+//  10. Generate thinlto_codegen edges if LTO is "thin"
+//
+// Edge cases:
+//   - Empty variant: Uses default toolchain from context
+//   - Variant with custom toolchain: Overrides default CC/CXX/Sysroot
+//   - Module-level LTO overrides context LTO setting
+//   - Shared libraries with shared_libs: Adds -l{depName} to ldflags
+//   - C++ sources: Adds cppflags to compilation flags
 func (r *ccLibrary) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext, variant string) string {
 	name := getName(m)
 	srcs := getSrcs(m)
@@ -379,24 +416,33 @@ func (r *ccLibrary) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext,
 		}
 	}
 
+	// Generate compile edges for each source file.
+	// Each source file is compiled to a separate .o object file with proper flags.
+	// Generate compile edges for each source file.
 	var edges strings.Builder
 	var objFiles []string
 
 	for _, src := range srcs {
 		obj := objectOutputName(name, src)
 		objFiles = append(objFiles, obj)
+		// Build edge: compile source to object with flags and compiler variables.
 		edges.WriteString(fmt.Sprintf("build %s: %s %s\n flags = %s\n CC = %s\n", obj, compileRule, filepath.Join(ctx.PathPrefix, src), cflags, compiler))
 	}
 
+	// Generate the final library output edge (archive or link).
 	out := r.Outputs(m, ctx)[0]
 
 	if shared {
+		// Shared library: link all object files and shared library dependencies.
 		allInputs := append(objFiles, sharedInputs...)
 		edges.WriteString(fmt.Sprintf("build %s: %s %s\n flags = %s\n CC = %s\n", out, sharedRule, strings.Join(allInputs, " "), ldflags, compiler))
 	} else {
+		// Static library: archive object files into .a file.
 		edges.WriteString(fmt.Sprintf("build %s: %s %s\n", out, archiveRule, strings.Join(objFiles, " ")))
 	}
 
+	// Generate thinLTO codegen edges for incremental LTO optimization.
+	// Each object file gets a corresponding .thinlto.o intermediate file.
 	if moduleLto == "thin" {
 		for _, src := range srcs {
 			obj := objectOutputName(name, src)
@@ -542,33 +588,40 @@ func (r *ccLibraryStatic) Outputs(m *parser.Module, ctx RuleRenderContext) []str
 func (r *ccLibraryStatic) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
+	// Exit early if module has no name or no source files.
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
 
+	// Determine LTO setting: module-level overrides context-level.
 	moduleLto := getLto(m)
 	if moduleLto == "" {
 		moduleLto = ctx.Lto
 	}
+	// Get LTO flags for compile step; link flags ignored for static libraries.
 	ltoCompileExtra, _ := ltoFlags(moduleLto)
 	compileRule := "cc_compile"
 	if moduleLto != "" {
 		compileRule = "cc_compile_lto"
 	}
 
+	// Build C flags: combine context flags, module cflags (no cppflags for static library).
 	cflags := joinFlags(ctx.CFlags, getCflags(m))
 	if ltoCompileExtra != "" {
 		cflags = strings.TrimSpace(cflags + " " + ltoCompileExtra)
 	}
 
+	// Generate compile edges for each source file.
 	var edges strings.Builder
 	var objFiles []string
 	for _, src := range srcs {
 		obj := objectOutputName(name, src)
 		objFiles = append(objFiles, obj)
+		// Build edge: compile source to object with flags.
 		edges.WriteString(fmt.Sprintf("build %s: %s %s\n flags = %s\n", obj, compileRule, filepath.Join(ctx.PathPrefix, src), cflags))
 	}
 
+	// Generate archive edge to create static library from all object files.
 	out := r.Outputs(m, ctx)[0]
 	edges.WriteString(fmt.Sprintf("build %s: cc_archive %s\n", out, strings.Join(objFiles, " ")))
 
@@ -916,33 +969,40 @@ func (r *ccObject) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 func (r *ccObject) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
+	// Exit early if module has no name or no source files.
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
 
+	// Determine LTO setting: module-level overrides context-level.
 	moduleLto := getLto(m)
 	if moduleLto == "" {
 		moduleLto = ctx.Lto
 	}
+	// Get LTO flags for compile step; link flags ignored for object files.
 	ltoCompileExtra, _ := ltoFlags(moduleLto)
 	compileRule := "cc_compile"
 	if moduleLto != "" {
 		compileRule = "cc_compile_lto"
 	}
 
+	// Build C flags: combine context flags and module cflags (no cppflags for object type).
 	cflags := joinFlags(ctx.CFlags, getCflags(m))
 	if ltoCompileExtra != "" {
 		cflags = strings.TrimSpace(cflags + " " + ltoCompileExtra)
 	}
 
+	// Single source optimization: use combined output name {name}{suffix}.o.
 	if len(srcs) == 1 {
 		out := r.Outputs(m, ctx)[0]
 		return fmt.Sprintf("build %s: %s %s\n flags = %s\n", out, compileRule, srcs[0], cflags)
 	}
 
+	// Multiple sources: generate one build edge per source file.
 	var edges strings.Builder
 	outputs := r.Outputs(m, ctx)
 	for i, src := range srcs {
+		// Build edge: compile each source to its corresponding object file.
 		edges.WriteString(fmt.Sprintf("build %s: %s %s\n flags = %s\n", outputs[i], compileRule, filepath.Join(ctx.PathPrefix, src), cflags))
 	}
 	return edges.String()
@@ -1094,15 +1154,21 @@ func (r *ccBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 func (r *ccBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	name := getName(m)
 	srcs := getSrcs(m)
+	// Exit early if module has no name or no source files.
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
 
+	// Check for architecture variants (e.g., host, target, arm64, x86_64).
+	// If variants exist, generate separate build edges for each variant.
 	variants := getGoTargetVariants(m)
 	if len(variants) == 0 {
+		// No variants: generate build edges for the default (empty variant).
 		return r.ninjaEdgeForVariant(m, ctx, "")
 	}
 
+	// Multiple variants: generate build edges for each variant in sorted order.
+	// Sorting ensures deterministic output regardless of map iteration order.
 	var edges strings.Builder
 	sorted := make([]string, len(variants))
 	copy(sorted, variants)
@@ -1113,6 +1179,40 @@ func (r *ccBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 	return edges.String()
 }
 
+// ninjaEdgeForVariant generates ninja build edges for a specific variant of cc_binary.
+// It compiles source files and links them into an executable binary.
+// Both static libraries (deps) and shared libraries (shared_libs) are linked.
+// Variant-specific toolchain settings (cc, cxx, sysroot, cflags, ldflags) are applied if available.
+//
+// Parameters:
+//   - m: Module being evaluated (must have "name", "srcs", "deps", "shared_libs" properties)
+//   - ctx: Rule render context with toolchain and flags (CC, CXX, CFlags, LdFlags, Lto, etc.)
+//   - variant: Variant name (e.g., "host", "target_arm64"); empty for default variant
+//
+// Returns:
+//   - Ninja build edge string for the variant (compilation + link edges)
+//   - Empty string if module has no name or no source files
+//
+// Build algorithm:
+//  1. Get module name, source files, and dependencies, exit early if missing
+//  2. Detect compiler type (C vs C++) from file extensions
+//  3. Determine LTO setting (module-level overrides context)
+//  4. Select compile rule (cc_compile or cc_compile_lto)
+//  5. Apply variant-specific toolchain (cc, cxx, sysroot) if available
+//  6. Build C/C++ flags including LTO, sysroot, variant-specific cflags
+//  7. Collect static library dependencies (deps) as .a files
+//  8. Collect shared library dependencies (shared_libs) and add -l flags
+//  9. Generate compile edges for each source file
+//  10. Generate link edge (cc_link or cc_link_lto) with all inputs
+//  11. Generate thinlto_codegen edges if LTO is "thin"
+//
+// Edge cases:
+//   - Empty variant: Uses default toolchain from context
+//   - Variant with custom toolchain: Overrides default CC/CXX/Sysroot
+//   - Module-level LTO overrides context LTO setting
+//   - Static deps: Linked as implicit inputs (| separator in ninja)
+//   - Shared libs: Adds -l{depName} to ldflags
+//   - C++ sources: Adds cppflags to compilation flags
 func (r *ccBinary) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext, variant string) string {
 	name := getName(m)
 	srcs := getSrcs(m)
@@ -1189,15 +1289,18 @@ func (r *ccBinary) ninjaEdgeForVariant(m *parser.Module, ctx RuleRenderContext, 
 		ldflags = joinFlags(ldflags, "-l"+depName)
 	}
 
+	// Generate compile edges for each source file.
 	var edges strings.Builder
 	var objFiles []string
 
 	for _, src := range srcs {
 		obj := objectOutputName(name, src)
 		objFiles = append(objFiles, obj)
-		edges.WriteString(fmt.Sprintf("build %s: %s %s\n flags = %s\n CC = %s\n", obj, compileRule, filepath.Join(ctx.PathPrefix, src), cflags, compiler))
+		// Build edge: compile source to object with flags.
+		edges.WriteString(fmt.Sprintf("build %s: %s %s\n flags = %s\n", obj, compileRule, filepath.Join(ctx.PathPrefix, src), cflags))
 	}
 
+	// Generate binary link edge with all object files and library dependencies.
 	out := r.Outputs(m, ctx)[0]
 	allInputs := append(objFiles, libFiles...)
 
@@ -1378,23 +1481,31 @@ func ccTestEdge(m *parser.Module, ctx RuleRenderContext) string {
 		libFiles = append(libFiles, sharedLibOutputName(depName, ctx.ArchSuffix))
 		linkFlags = joinFlags(linkFlags, "-l"+depName)
 	}
+	// Generate compile edges for each source file.
 	var edges strings.Builder
 	var objFiles []string
 	for _, src := range srcs {
 		obj := objectOutputName(name, src)
 		objFiles = append(objFiles, obj)
+		// Build edge: compile source to object with flags and compiler variables.
 		edges.WriteString(fmt.Sprintf("build %s: %s %s\n flags = %s\n CC = %s\n", obj, compileRule, filepath.Join(ctx.PathPrefix, src), cflags, compiler))
 	}
+	// Test binary output: name.test with architecture suffix.
 	out := name + ".test" + ctx.ArchSuffix
+	// Combine all inputs: object files + static and shared library dependencies.
 	allInputs := append(objFiles, libFiles...)
+	// Select link rule based on LTO setting.
 	linkRule := "cc_link"
 	if moduleLto != "" {
 		linkRule = "cc_link_lto"
 	}
+	// Build edge: link all inputs into test binary with flags and compiler variables.
 	edges.WriteString(fmt.Sprintf("build %s: %s %s\n flags = %s\n CC = %s\n", ninjaEscapePath(out), linkRule, strings.Join(allInputs, " "), linkFlags, compiler))
+	// Add test-specific arguments if test_options property is set.
 	if args := getTestOptionArgs(m); args != "" {
 		edges.WriteString(fmt.Sprintf(" test_args = %s\n", args))
 	}
+	// Generate thinLTO codegen edges for incremental LTO optimization.
 	if moduleLto == "thin" {
 		for _, src := range srcs {
 			obj := objectOutputName(name, src)

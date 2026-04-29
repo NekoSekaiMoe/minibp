@@ -82,8 +82,10 @@ func sanitizeManifestValue(s string) string {
 //   - Name with path characters: Replaces / and \ with _ to flatten the path
 //   - Name with "..": Also gets sanitized since / is replaced
 func sanitizeOutdir(name string) string {
+	// Check if the module name contains path traversal characters (slashes or "..").
 	if strings.Contains(name, "/") || strings.Contains(name, "\\") ||
 		strings.Contains(name, "..") {
+		// Replace path separators with underscores to flatten the directory name and prevent traversal.
 		return strings.Map(func(r rune) rune {
 			if r == '/' || r == '\\' {
 				return '_'
@@ -133,7 +135,8 @@ func (r *javaLibrary) Name() string { return "java_library" }
 // Edge cases:
 //   - This rule doesn't use toolchain context (always uses system javac and jar)
 func (r *javaLibrary) NinjaRule(ctx RuleRenderContext) string {
-
+	// Rule 1: javac_lib compiles Java sources to .class files in the output directory.
+	// Rule 2: jar_create packages .class files from the output directory into a JAR archive.
 	return `rule javac_lib
 
   command = javac -d $outdir $in $flags
@@ -143,7 +146,6 @@ rule jar_create
   command = jar cf $out -C $outdir .
 
 `
-
 }
 
 // Outputs returns the output paths for Java libraries.
@@ -194,18 +196,25 @@ func (r *javaLibrary) Outputs(m *parser.Module, ctx RuleRenderContext) []string 
 //   - Missing name: Returns "" (cannot determine output path)
 //   - Special characters in name: Sanitized via sanitizeOutdir for outdir
 func (r *javaLibrary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
+	// Extract module name and source files; return early if required properties are missing.
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
 
+	// Retrieve Java compiler flags from the module's "javaflags" property.
 	javaflags := getJavaflags(m)
+	// Get the output JAR path (e.g., "foo.jar") from the Outputs method.
 	out := r.Outputs(m, ctx)[0]
+	// Staging directory for .class files, sanitized to prevent path traversal attacks.
 	outdir := sanitizeOutdir(name) + "_classes"
 
+	// Use strings.Builder to efficiently construct the ninja build edge string.
 	var edges strings.Builder
+	// First build edge: compile .java sources to .class files in the staging directory.
 	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_lib %s\n outdir = %s\n flags = %s\n", name, strings.Join(srcs, " "), outdir, javaflags))
+	// Second build edge: package .class files into the final .jar archive.
 	edges.WriteString(fmt.Sprintf("build %s: jar_create %s.stamp\n outdir = %s\n", out, name, outdir))
 	return edges.String()
 }
@@ -277,6 +286,8 @@ func (r *javaBinary) Name() string {
 //   - This rule doesn't use toolchain context (always uses system javac and jar)
 //   - Manifest values are sanitized via sanitizeManifestValue to prevent corruption
 func (r *javaBinary) NinjaRule(ctx RuleRenderContext) string {
+	// Rule 1: javac_bin compiles Java sources to .class files in the output directory.
+	// Rule 2: jar_create_executable creates executable JAR with manifest containing Main-Class.
 	return `rule javac_bin
   command = javac -d $outdir $in $flags
 
@@ -338,6 +349,7 @@ func (r *javaBinary) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 //   - Missing main_class: Returns "" (JAR cannot be executed without main class)
 //   - Special characters in main_class: Sanitized via sanitizeManifestValue
 func (r *javaBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
+	// Extract required module properties; return early if any are missing.
 	name := getName(m)
 	srcs := getSrcs(m)
 	mainClass := GetStringProp(m, "main_class")
@@ -345,13 +357,20 @@ func (r *javaBinary) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
 		return ""
 	}
 
+	// Retrieve Java compiler flags from the module's "javaflags" property.
 	javaflags := getJavaflags(m)
+	// Get the output executable JAR path (e.g., "foo.jar") from the Outputs method.
 	out := r.Outputs(m, ctx)[0]
+	// Staging directory for .class files, sanitized to prevent path traversal attacks.
 	outdir := sanitizeOutdir(name) + "_classes"
+	// Sanitize the main class name to avoid manifest file corruption (e.g., embedded newlines).
 	safeMainClass := sanitizeManifestValue(mainClass)
 
+	// Use strings.Builder to efficiently construct the ninja build edge string.
 	var edges strings.Builder
+	// First build edge: compile .java sources to .class files in the staging directory.
 	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_bin %s\n outdir = %s\n flags = %s\n", name, strings.Join(srcs, " "), outdir, javaflags))
+	// Second build edge: create executable JAR with manifest containing Main-Class and Class-Path.
 	edges.WriteString(fmt.Sprintf("build %s: jar_create_executable %s.stamp\n outdir = %s\n main_class = %s\n class_path = .\n", out, name, outdir, safeMainClass))
 	return edges.String()
 }
@@ -421,24 +440,20 @@ func (r *javaLibraryStatic) Name() string {
 //   - This rule doesn't use toolchain context (always uses system javac and jar)
 func (r *javaLibraryStatic) NinjaRule(ctx RuleRenderContext) string {
 
+	// Rule 1: javac_lib compiles Java sources to .class files in the output directory.
+	// Rule 2: jar_create packages .class files into a .jar archive.
 	return `rule javac_lib
-
 
 
   command = javac -d $outdir $in $flags
 
 
-
 rule jar_create
-
 
 
   command = jar cf $out -C $outdir .
 
-
-
 `
-
 }
 
 // Outputs returns the output paths for static Java libraries.
@@ -490,18 +505,25 @@ func (r *javaLibraryStatic) Outputs(m *parser.Module, ctx RuleRenderContext) []s
 //   - Missing name: Returns "" (cannot determine output path)
 //   - Special characters in name: Sanitized via sanitizeOutdir for outdir
 func (r *javaLibraryStatic) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
+	// Extract module name and source files; return early if required properties are missing.
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
 
+	// Retrieve Java compiler flags from the module's "javaflags" property.
 	javaflags := getJavaflags(m)
+	// Get the output static JAR path (e.g., "libfoo.a.jar") from the Outputs method.
 	out := r.Outputs(m, ctx)[0]
+	// Staging directory for .class files (note: sanitizeOutdir is not applied here, unlike javaLibrary).
 	outdir := name + "_classes"
 
+	// Use strings.Builder to efficiently construct the ninja build edge string.
 	var edges strings.Builder
+	// First build edge: compile .java sources to .class files in the staging directory.
 	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_lib %s\n outdir = %s\n flags = %s\n", name, strings.Join(srcs, " "), outdir, javaflags))
+	// Second build edge: package .class files into the static .a.jar archive.
 	edges.WriteString(fmt.Sprintf("build %s: jar_create %s.stamp\n outdir = %s\n", out, name, outdir))
 	return edges.String()
 }
@@ -570,6 +592,8 @@ func (r *javaLibraryHost) Name() string { return "java_library_host" }
 //   - This rule doesn't use toolchain context (always uses system javac and jar)
 func (r *javaLibraryHost) NinjaRule(ctx RuleRenderContext) string {
 
+	// Rule 1: javac_lib compiles Java sources to .class files in the output directory.
+	// Rule 2: jar_create packages .class files into a .jar archive.
 	return `rule javac_lib
 
   command = javac -d $outdir $in $flags
@@ -579,7 +603,6 @@ rule jar_create
   command = jar cf $out -C $outdir .
 
 `
-
 }
 
 // Outputs returns the output paths for host libraries.
@@ -631,18 +654,25 @@ func (r *javaLibraryHost) Outputs(m *parser.Module, ctx RuleRenderContext) []str
 //   - Missing name: Returns "" (cannot determine output path)
 //   - Special characters in name: Sanitized via sanitizeOutdir for outdir
 func (r *javaLibraryHost) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
+	// Extract module name and source files; return early if required properties are missing.
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
 
+	// Retrieve Java compiler flags from the module's "javaflags" property.
 	javaflags := getJavaflags(m)
+	// Get the output host JAR path (e.g., "foo-host.jar") from the Outputs method.
 	out := r.Outputs(m, ctx)[0]
+	// Staging directory for .class files (note: sanitizeOutdir is not applied here, unlike javaLibrary).
 	outdir := name + "_classes"
 
+	// Use strings.Builder to efficiently construct the ninja build edge string.
 	var edges strings.Builder
+	// First build edge: compile .java sources to .class files in the staging directory.
 	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_lib %s\n outdir = %s\n flags = %s\n", name, strings.Join(srcs, " "), outdir, javaflags))
+	// Second build edge: package .class files into the host .jar archive.
 	edges.WriteString(fmt.Sprintf("build %s: jar_create %s.stamp\n outdir = %s\n", out, name, outdir))
 	return edges.String()
 }
@@ -712,6 +742,8 @@ func (r *javaBinaryHost) Name() string { return "java_binary_host" }
 //   - This rule doesn't use toolchain context (always uses system javac and jar)
 func (r *javaBinaryHost) NinjaRule(ctx RuleRenderContext) string {
 
+	// Rule 1: javac_bin compiles Java sources to .class files in the output directory.
+	// Rule 2: jar_create_executable creates executable JAR with main class using jar cfe.
 	return `rule javac_bin
 
   command = javac -d $outdir $in $flags
@@ -721,7 +753,6 @@ rule jar_create_executable
   command = jar cfe $out $main_class -C $outdir .
 
 `
-
 }
 
 // Outputs returns the output paths for host binaries.
@@ -774,6 +805,7 @@ func (r *javaBinaryHost) Outputs(m *parser.Module, ctx RuleRenderContext) []stri
 //   - Missing main_class: Returns "" (host binaries still need a main class)
 //   - Special characters in name: Sanitized via sanitizeOutdir for outdir
 func (r *javaBinaryHost) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
+	// Extract required module properties; return early if any are missing.
 	name := getName(m)
 	srcs := getSrcs(m)
 	mainClass := GetStringProp(m, "main_class")
@@ -781,12 +813,18 @@ func (r *javaBinaryHost) NinjaEdge(m *parser.Module, ctx RuleRenderContext) stri
 		return ""
 	}
 
+	// Retrieve Java compiler flags from the module's "javaflags" property.
 	javaflags := getJavaflags(m)
+	// Get the output host executable JAR path (e.g., "foo-host.jar") from the Outputs method.
 	out := r.Outputs(m, ctx)[0]
+	// Staging directory for .class files (note: sanitizeOutdir is not applied here, unlike javaLibrary).
 	outdir := name + "_classes"
 
+	// Use strings.Builder to efficiently construct the ninja build edge string.
 	var edges strings.Builder
+	// First build edge: compile .java sources to .class files in the staging directory.
 	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_bin %s\n outdir = %s\n flags = %s\n", name, strings.Join(srcs, " "), outdir, javaflags))
+	// Second build edge: create executable JAR with main class using jar cfe.
 	edges.WriteString(fmt.Sprintf("build %s: jar_create_executable %s.stamp\n outdir = %s\n main_class = %s\n", out, name, outdir, mainClass))
 	return edges.String()
 }
@@ -844,6 +882,8 @@ func (r *javaTest) Name() string { return "java_test" }
 //   - This rule doesn't use toolchain context (always uses system javac and jar)
 func (r *javaTest) NinjaRule(ctx RuleRenderContext) string {
 
+	// Rule 1: javac_test compiles test Java sources to .class files in the output directory.
+	// Rule 2: jar_test packages .class files into a test JAR archive.
 	return `rule javac_test
 
   command = javac -d $outdir $in $flags
@@ -853,7 +893,6 @@ rule jar_test
   command = jar cf $out -C $outdir .
 
 `
-
 }
 
 // Outputs returns the output paths for test modules.
@@ -907,20 +946,29 @@ func (r *javaTest) Outputs(m *parser.Module, ctx RuleRenderContext) []string {
 //   - Special characters in name: Sanitized via sanitizeOutdir for outdir
 //   - test_options property: Adds test_args variable to build edge
 func (r *javaTest) NinjaEdge(m *parser.Module, ctx RuleRenderContext) string {
+	// Extract module name and source files; return early if required properties are missing.
 	name := getName(m)
 	srcs := getSrcs(m)
 	if name == "" || len(srcs) == 0 {
 		return ""
 	}
 
+	// Retrieve Java compiler flags from the module's "javaflags" property (may include test-specific flags).
 	javaflags := getJavaflags(m)
+	// Get the output test JAR path (e.g., "foo-test.jar") from the Outputs method.
 	out := r.Outputs(m, ctx)[0]
+	// Staging directory for .class files (note: sanitizeOutdir is not applied here, unlike javaLibrary).
 	outdir := name + "_classes"
+	// Retrieve test-specific arguments from the "test_options" property, if any.
 	testArgs := getTestOptionArgs(m)
 
+	// Use strings.Builder to efficiently construct the ninja build edge string.
 	var edges strings.Builder
+	// First build edge: compile test .java sources to .class files in the staging directory.
 	edges.WriteString(fmt.Sprintf("build %s.stamp: javac_test %s\n outdir = %s\n flags = %s\n", name, strings.Join(srcs, " "), outdir, javaflags))
+	// Second build edge: package .class files into the test JAR archive.
 	edges.WriteString(fmt.Sprintf("build %s: jar_test %s.stamp\n outdir = %s\n", out, name, outdir))
+	// Add test arguments variable if test_options property is present.
 	if testArgs != "" {
 		edges.WriteString(fmt.Sprintf(" test_args = %s\n", testArgs))
 	}
@@ -981,10 +1029,13 @@ func (r *javaImport) Name() string { return "java_import" }
 //   - No compilation needed: This rule only copies files
 func (r *javaImport) NinjaRule(ctx RuleRenderContext) string {
 
+	// Default copy command for Unix-like systems (Linux, macOS).
 	copyCmd := "cp $in $out"
 
+	// Use Windows-specific copy command when running on Windows OS.
 	if runtime.GOOS == "windows" {
 
+		// Windows requires cmd /c to execute the copy command in the command prompt.
 		copyCmd = "cmd /c copy $in $out"
 
 	}
@@ -994,7 +1045,6 @@ func (r *javaImport) NinjaRule(ctx RuleRenderContext) string {
   command = ` + copyCmd + `
 
 `
-
 }
 
 // Outputs returns the output paths for imported JARs.

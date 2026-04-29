@@ -1,6 +1,41 @@
 // Package hasher provides dependency hash calculation for incremental builds.
+//
 // It calculates SHA256 hashes of modules and their dependency trees to determine
-// if a rebuild is necessary.
+// if a rebuild is necessary. The hasher is a core component of the minibp build
+// system's incremental build support.
+//
+// The hash of a module incorporates three components:
+//  1. The module's own properties (type, name, srcs, deps, cflags)
+//  2. All transitive dependency module hashes (recursive)
+//  3. All source file content hashes
+//
+// This design ensures that any change to a module's configuration, its dependencies,
+// or its source files will result in a different hash, triggering a rebuild.
+//
+// Key design decisions:
+//   - Deterministic hashing: Properties are sorted before hashing to ensure
+//     consistent results across runs regardless of declaration order.
+//   - In-memory caching: Computed hashes are cached during a session to avoid
+//     redundant computation for modules sharing dependencies.
+//   - Persistent storage: Hashes are stored on disk (in .minibp/hash/) to enable
+//     incremental build decisions across multiple build invocations.
+//   - Parallel file hashing: Source files are hashed concurrently with a worker
+//     pool (limited to 32 concurrent operations) for performance.
+//   - Path traversal protection: Module names are sanitized before use in file
+//     paths to prevent directory escape attacks.
+//
+// Typical usage:
+//
+//	h := hasher.NewHasher(buildDir)
+//	hash, err := h.CalculateModuleHash(module, allModules)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	h.StoreHash(moduleName, hash)
+//	rebuild, err := h.NeedsRebuild(moduleName)
+//
+// The hasher is used by the build system to generate build.ninja files
+// that only rebuild targets whose inputs have changed.
 package hasher
 
 import (
@@ -519,20 +554,6 @@ func (h *Hasher) NeedsRebuild(moduleName string) (bool, error) {
 	return currentHash != storedHash, nil
 }
 
-// StoreHash stores the hash for a module to disk.
-//
-// This function writes the hash to a file in the hash storage directory.
-// The file is named <moduleName>.hash and contains the plain text hash.
-//
-// The hash directory is created if it doesn't exist.
-//
-// Parameters:
-//   - moduleName: Module name (used as filename)
-//   - hash: Hex-encoded hash string to store
-//
-// Returns:
-//   - error: Non-nil if directory creation or file write fails
-//
 // sanitizeHashPath sanitizes a module name for use as a filename.
 //
 // This function prevents path traversal attacks by replacing path separators

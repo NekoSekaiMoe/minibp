@@ -62,6 +62,11 @@ import (
 //   - Empty srcFile means this is a linking/packaging step
 //   - Non-empty srcFile means this is a compilation step
 //
+// Key design decisions:
+//   - The interface separates rule definition (NinjaRule), build edges (NinjaEdge), outputs (Outputs), and descriptions (Desc) to allow each rule type to customize each aspect independently.
+//   - Desc() uses srcFile to distinguish between compilation (non-empty srcFile) and linking/packaging (empty srcFile) steps, enabling more informative build logging.
+//   - Outputs() includes architecture suffixes for multi-arch builds, allowing the build system to handle multiple architectures in a single build.
+//
 // Edge cases:
 //   - Empty srcs should still produce valid rule output
 //   - Missing required properties should produce error messages in Desc()
@@ -117,6 +122,13 @@ type BuildRule interface {
 //   - PathPrefix: Prefix for file paths (used for namespace support)
 //   - Prepended to dependency file paths
 //   - Enables cross-namespace module references
+//
+// Key design decisions:
+//   - Uses a struct to pass toolchain configuration to all rule rendering methods, avoiding global state.
+//   - Includes both tool paths (CC, CXX, AR) and flags (CFlags, LdFlags) to allow complete command generation.
+//   - Supports cross-compilation via GOOS/GOARCH and Sysroot fields.
+//   - PathPrefix enables namespace support for cross-namespace module references.
+//   - Modules map is included for resolving cross-module dependencies during rendering.
 type RuleRenderContext struct {
 	CC             string
 	CXX            string
@@ -146,6 +158,11 @@ type RuleRenderContext struct {
 // Note:
 //   - Ccache, Lto, Sysroot, GOOS, GOARCH are left empty (no defaults)
 //   - These must be set explicitly via command-line flags or build configuration
+//
+// Key design decisions:
+//   - Only sets CC, CXX, AR to common Linux defaults; leaves other fields empty to force explicit configuration.
+//   - Does not enable ccache by default, as it may not be installed on all systems.
+//   - Returns a value (not pointer) to avoid shared mutable state.
 func DefaultRuleRenderContext() RuleRenderContext {
 	return RuleRenderContext{
 		CC:  "gcc",
@@ -177,6 +194,12 @@ func DefaultRuleRenderContext() RuleRenderContext {
 //
 // Note: The order of rules in this slice doesn't affect functionality,
 // but related rules are grouped together for maintainability.
+//
+// Key design decisions:
+//   - Returns a new slice each call to avoid mutable shared state.
+//   - Uses struct literals rather than a registry pattern for simplicity and explicitness.
+//   - Related rules are grouped together in the slice to make it easy to find and maintain specific rule types.
+//   - Some rule types (like defaultsModule, prebuiltEtcRule, prebuiltLibraryRule) use different struct literals with typeName to create multiple instances for different module types.
 func GetAllRules() []BuildRule {
 	return []BuildRule{
 		// C/C++ rules
@@ -253,6 +276,11 @@ func GetAllRules() []BuildRule {
 // Edge cases:
 //   - Name not found: Returns nil
 //   - Multiple rules with same name: Returns first match (should not happen in practice)
+//
+// Key design decisions:
+//   - Uses linear search through GetAllRules() rather than a map lookup to keep the implementation simple and avoid initialization order issues.
+//   - The linear search is acceptable because the number of registered rules is small (typically < 50) and this function is not called in hot loops.
+//   - Rule names are matched exactly (case-sensitive) to match Blueprint/Soong semantics.
 func GetRule(name string) BuildRule {
 	for _, r := range GetAllRules() {
 		if r.Name() == name {
@@ -298,6 +326,12 @@ func GetRule(name string) BuildRule {
 //   - Empty defaults list: No-op (function returns early)
 //   - nil Map on module: Returns early without error
 //   - Malformed property values: May cause issues in downstream processing
+//
+// Key design decisions:
+//   - Uses additive merging for list properties (defaults appended after target values) to allow defaults to provide base flags while targets can add/override.
+//   - Skips "name" and "defaults" properties to prevent identity conflicts and recursive application.
+//   - Silently skips missing defaults modules rather than erroring, following Soong's lenient approach to allow optional defaults.
+//   - Modifies the target module in-place rather than returning a new module, as the caller expects the module to be updated directly.
 //
 // Example:
 //
@@ -396,6 +430,11 @@ func ApplyDefaults(m *parser.Module, modules map[string]*parser.Module) {
 //   - Package module is nil: Skipped silently (continues search)
 //   - Multiple package modules: Returns first match (undefined behavior)
 //
+// Key design decisions:
+//   - Uses suffix matching (HasSuffix) to handle both simple names ("foo") and full paths ("path/to/foo") for package module lookup.
+//   - Searches through all modules linearly rather than maintaining a separate package module index, as this function is called infrequently during build setup.
+//   - Returns nil instead of empty slice when no visibility is found, allowing callers to distinguish "no default visibility" from "empty visibility list".
+//
 // Note: Package modules are named after their package path.
 // Matching checks both exact name and suffix (handles "foo" and "path/to/foo").
 func GetDefaultVisibility(modules map[string]*parser.Module, packageName string) []string {
@@ -443,6 +482,11 @@ func GetDefaultVisibility(modules map[string]*parser.Module, packageName string)
 //   - No package module found: Returns nil (no default visibility)
 //   - Multiple package modules at same level: Returns first match (undefined behavior)
 //   - Empty path: Returns nil (root package not typically defined)
+//
+// Key design decisions:
+//   - Traverses from most specific path to least specific (longest to shortest) to ensure closest ancestor wins.
+//   - Uses path splitting and progressive shortening rather than explicit parent lookup, which handles arbitrary nesting depths without recursion.
+//   - Returns the first match found (closest ancestor) rather than aggregating, as visibility inheritance follows a single-chain pattern in Soong.
 func GetPackageDefaultVisibility(modules map[string]*parser.Module, modulePath string) []string {
 	// Try to find package module at the same level and traverse up
 	parts := strings.Split(modulePath, "/")
@@ -504,6 +548,12 @@ type ModuleReference struct {
 //   - String without ":" prefix: Returns nil (not a module reference)
 //   - Malformed tag (missing closing "}"): Tag part is ignored, module name still parsed
 //   - Cross-namespace "//namespace:module": ModuleName set to part after ":"
+//
+// Key design decisions:
+//   - Handles cross-namespace references (//namespace:module) separately from simple references (:module) for clarity.
+//   - Cross-namespace references extract only the module name after ":", dropping the namespace prefix, as namespace resolution happens elsewhere.
+//   - Tag syntax {tag} is parsed only when both "{" and "}" are present, with "}" at the end of the string.
+//   - Returns nil for non-references (strings without ":" prefix) to allow callers to distinguish references from file paths.
 //
 // Examples:
 //
@@ -567,6 +617,12 @@ func ParseModuleReference(s string) *ModuleReference {
 //   - Tag ".stamp": Returns first output with ".stamp" appended (for tracking)
 //   - Other tags: Returns first output with tag suffix appended
 //   - Module not found in map: Returns nil (broken reference)
+//
+// Key design decisions:
+//   - Looks up the rule by module type to leverage the rule's Outputs() method, which knows the correct output paths for each module type.
+//   - Returns only the first output when a tag is specified (other than ".stamp"), as tags are typically used to select a specific variant.
+//   - The ".stamp" tag is special-cased to append ".stamp" to the first output, creating a touch file for tracking build completion.
+//   - Returns nil (not empty slice) when resolution fails, allowing callers to distinguish "no outputs" from "resolution failed".
 //
 // Examples:
 //
@@ -643,6 +699,11 @@ func ResolveModuleOutputs(ref *ModuleReference, modules map[string]*parser.Modul
 //   - Empty input list: Returns empty list
 //   - Module not found: Reference string is used as-is (preserving original intent)
 //
+// Key design decisions:
+//   - Preserves unresolved module references as-is in the output, allowing Ninja to report the error with the original reference string.
+//   - Expands all outputs for untagged references (ref.Tag == ""), as the caller typically wants all outputs from the referenced module.
+//   - Uses ParseModuleReference to distinguish module references from file paths, enabling transparent handling of mixed lists.
+//
 // Example:
 //
 //	items := []string{":libfoo", "src/bar.c"}
@@ -681,6 +742,10 @@ func ExpandModuleReferences(items []string, modules map[string]*parser.Module, c
 // Edge cases:
 //   - nil or empty slice: Returns false
 //   - Multiple entries: Returns true if any entry matches
+//
+// Key design decisions:
+//   - Uses simple linear scan rather than map lookup, as visibility lists are typically short (1-3 entries).
+//   - Returns true on first match for efficiency, as the caller typically only cares whether public visibility is present.
 func IsVisibilityPublic(vis []string) bool {
 	for _, v := range vis {
 		if v == "//visibility:public" {
@@ -705,6 +770,10 @@ func IsVisibilityPublic(vis []string) bool {
 // Edge cases:
 //   - nil or empty slice: Returns false
 //   - Multiple entries: Returns true if any entry matches
+//
+// Key design decisions:
+//   - Uses simple linear scan rather than map lookup, as visibility lists are typically short (1-3 entries).
+//   - Returns true on first match for efficiency, as the caller typically only cares whether private visibility is present.
 func IsVisibilityPrivate(vis []string) bool {
 	for _, v := range vis {
 		if v == "//visibility:private" {
@@ -729,6 +798,10 @@ func IsVisibilityPrivate(vis []string) bool {
 // Edge cases:
 //   - nil or empty slice: Returns false
 //   - Multiple entries: Returns true if any entry matches
+//
+// Key design decisions:
+//   - Uses simple linear scan rather than map lookup, as visibility lists are typically short (1-3 entries).
+//   - Returns true on first match for efficiency, as the caller typically only cares whether override visibility is present.
 func IsVisibilityOverride(vis []string) bool {
 	for _, v := range vis {
 		if v == "//visibility:override" {
@@ -765,6 +838,12 @@ func IsVisibilityOverride(vis []string) bool {
 //   - Malformed rule: Returns false (only exact matches are valid)
 //   - Partial match: Returns false (e.g., "//visibility:pub" is not valid)
 //   - Extra spaces: Returns false (whitespace is not trimmed)
+//
+// Key design decisions:
+//   - Validates against an explicit list of supported visibility rules to catch typos and invalid values early.
+//   - Does not trim whitespace, matching Soong's strict parsing behavior where whitespace is significant.
+//   - Uses exact string matching rather than prefix matching to prevent partial matches (e.g., "//visibility:pub" is not valid).
+//   - Handles package references with "__pkg__" and "__subpackages__" suffixes as special cases, as they follow a different format than the standard visibility rules.
 //
 // Examples:
 //

@@ -1,3 +1,19 @@
+// Package incremental provides incremental build support for the minibp build system.
+//
+// It implements caching of parsed Blueprint files to avoid re-parsing unchanged files,
+// dependency tracking via file hashes (dep.json), and an intermediate representation
+// (build.json) that merges all parsed Blueprint files into a single structured format.
+//
+// The incremental build process works as follows:
+//  1. For each .bp file, compare its current hash with the cached hash in dep.json
+//  2. If unchanged, load the cached JSON AST from .minibp/json/
+//  3. If modified or new, parse the file and cache the result
+//  4. Merge all parsed files into a BuildJSON structure
+//  5. Save the updated dependency hashes for the next run
+//
+// This package is used by the main minibp tool to speed up builds when only a few
+// files have changed.
+
 package incremental
 
 import (

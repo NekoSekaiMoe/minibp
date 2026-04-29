@@ -1,5 +1,4 @@
 // Package parser provides lexical analysis and parsing for Blueprint build definitions.
-// Parser subpackage - Blueprint recursive descent parser.
 //
 // This package implements the second stage of the Blueprint build system:
 // it takes a stream of tokens from the lexer and produces an Abstract Syntax Tree (AST).
@@ -184,24 +183,46 @@ func (p *Parser) expectPeek(t TokenType) bool {
 }
 
 // Parse parses the entire input and returns a File AST node.
+//
 // It repeatedly parses definitions until the end of file is reached.
 // After parsing all definitions, it collects any lexer errors to ensure
-// all issues are reported to the caller.
+// all issues are reported to the caller in a single pass.
 //
 // Parse flow:
 //  1. Create an empty File node with the filename
 //  2. Loop: parseDefinition() until EOF token
-//  3. Collect errors from parser and lexer
-//  4. Return File and errors
+//  3. On error: collect error and call skipToNextDefinition() for error recovery
+//  4. On success: append definition to file.Defs
+//  5. After loop: collect lexer errors if no parser errors occurred
+//  6. Return File and errors
 //
 // Error handling:
-//   - Parse errors are collected rather than failing immediately
-//   - Error recovery via skipToNextDefinition() continues after errors
-//   - Lexer errors are included in the final error list
+//   - Parse errors are collected rather than failing immediately.
+//     This allows users to see all syntax errors at once rather than fixing one at a time.
+//   - Error recovery via skipToNextDefinition() continues parsing after errors.
+//     The parser skips forward to the next IDENT token (potential definition start).
+//   - Lexer errors are included in the final error list only if there are no parser errors.
+//     This avoids duplicate error reporting for the same issue.
+//
+// Parameters:
+//   - None (operates on the parser's internal state set during NewParser).
+//     The parser must be initialized with NewParser() before calling Parse().
 //
 // Returns:
-//   - *File: The parsed AST representation of the Blueprint file
-//   - []error: A list of errors encountered during parsing (empty if successful)
+//   - *File: The parsed AST representation of the Blueprint file.
+//     May contain partially parsed definitions if errors were encountered.
+//     The File.Defs slice contains all successfully parsed definitions.
+//   - []error: A list of errors encountered during parsing.
+//     Empty slice if parsing succeeded with no errors.
+//     Errors include source position information for error reporting.
+//
+// Edge cases:
+//   - Empty input (no tokens except EOF) returns an empty File with no definitions.
+//   - Input with only comments returns an empty File (comments are skipped by lexer).
+//   - Parse errors don't stop the parser; it continues to find more errors.
+//   - If skipToNextDefinition() can't find a recovery point, parsing stops at EOF.
+//   - Lexer errors are only reported when there are no parser errors
+//     (to avoid cascading error messages for the same issue).
 func (p *Parser) Parse() (*File, []error) {
 	file := &File{Name: p.fileName}
 
@@ -236,20 +257,38 @@ func (p *Parser) Parse() (*File, []error) {
 // or variable name) or reaches EOF. This allows the parser to
 // recover from syntax errors and continue processing the rest of the file.
 //
+// Error recovery strategy:
+//   - After a parse error, the parser's current token might be in the middle of
+//     an incomplete definition (e.g., after a missing comma or bracket).
+//   - By skipping to the next IDENT token, we attempt to find the start of
+//     the next definition, allowing the parser to continue with minimal loss.
+//   - This design enables reporting multiple errors in a single pass, which
+//     is more user-friendly than failing on the first error.
+//
 // Example error recovery:
 //
 //	my_module { srcs: ["file.c", }
-//	         ^ parse error here
+//	         ^ parse error here (missing quote or bracket)
 //	another_module { }  <- skipToNextDefinition skips to here
+//
+// Edge cases:
+//   - If already at EOF, the function returns immediately (no tokens to skip).
+//   - If at an IDENT token when called, the function returns without skipping
+//     (the IDENT is the start of the next definition).
+//   - If no IDENT token exists before EOF, the function stops at EOF.
+//   - The function does not consume the IDENT token it finds; it leaves
+//     the parser positioned at that token for the next parse attempt.
 func (p *Parser) skipToNextDefinition() {
 	for p.curToken.Type != EOF && p.curToken.Type != IDENT {
 		p.nextToken()
 	}
 }
 
-// parseDefinition parses either a module or an assignment.
+// parseDefinition parses either a module or an assignment definition.
+//
 // A definition starts with an identifier (module type or variable name).
-// After the identifier:
+// After the identifier, the parser looks at the next token to determine
+// the definition type:
 //   - If followed by LBRACE ({), it's a module definition
 //   - If followed by ASSIGN (=) or PLUSEQ (+=), it's an assignment
 //
@@ -258,14 +297,33 @@ func (p *Parser) skipToNextDefinition() {
 //	Definition -> IDENT (LBRACE Module | (ASSIGN | PLUSEQ) Assignment)
 //
 // Token flow:
-//  1. Verify current token is IDENT
-//  2. Record name and position
+//  1. Verify current token is IDENT (otherwise return error)
+//  2. Record name and position for error reporting
 //  3. Advance to next token
-//  4. Check token to decide definition type
+//  4. Check token to decide definition type (LBRACE vs ASSIGN/PLUSEQ)
+//  5. Dispatch to parseModule() or parseAssignment()
+//
+// Parameters:
+//   - None (operates on parser's current token state)
+//     The parser must be positioned at an IDENT token when calling this method.
 //
 // Returns:
-//   - Definition: A Module or Assignment AST node
-//   - error: nil if successful, otherwise a parse error
+//   - Definition: A Module or Assignment AST node, or nil on error.
+//     The returned interface will be either *Module or *Assignment.
+//   - error: nil if successful, otherwise a parse error with position information.
+//     Errors include the line content and caret position for display.
+//
+// Edge cases:
+//   - If current token is not IDENT, returns error with suggestion to use identifier.
+//   - If token after IDENT is not LBRACE, ASSIGN, or PLUSEQ, returns error.
+//   - Module names and variable names share the same IDENT token type;
+//     the distinction is made by the following token.
+//
+// Examples:
+//
+//	cc_binary { ... }     -> parseModule (IDENT + LBRACE)
+//	my_var = "value"      -> parseAssignment (IDENT + ASSIGN)
+//	my_list += ["item"]   -> parseAssignment (IDENT + PLUSEQ)
 func (p *Parser) parseDefinition() (Definition, error) {
 	if p.curToken.Type != IDENT {
 		return nil, errors.Syntax(fmt.Sprintf("expected identifier, got %s", p.curToken.Type)).
@@ -298,18 +356,48 @@ func (p *Parser) parseDefinition() (Definition, error) {
 }
 
 // parseModule parses a module definition: type { property_list }
+//
 // A module consists of a type name (like "cc_binary", "cc_library") followed by
-// a block of properties enclosed in braces. Special properties "arch", "host",
-// "target", and "multilib" are extracted as architecture/target-specific overrides
-// that apply to different build configurations.
+// a block of properties enclosed in braces. The module type determines how the
+// module will be built by the ninja generator.
+//
+// Special properties are extracted from the property list and stored separately:
+//   - "arch": Architecture-specific overrides (arm, arm64, x86, x86_64)
+//   - "host": Host-specific overrides (when building for the host machine)
+//   - "target": Target-specific overrides (when building for the target device)
+//   - "multilib": Multilib overrides (lib32, lib64 for 32/64-bit builds)
+//   - "override": Override flag for replacing existing module definitions
+//
+// These special properties are removed from the main property list and stored
+// in separate fields of the Module struct for variant matching during the
+// build phase.
 //
 // Parameters:
-//   - typeName: The module type name (e.g., "cc_binary", "cc_library")
-//   - typePos: The source position of the type name
+//   - typeName: The module type name (e.g., "cc_binary", "cc_library", "go_binary").
+//     This is the identifier that appeared before the opening brace.
+//   - typePos: The source position of the type name for error reporting.
 //
 // Returns:
-//   - *Module: The parsed module AST node
-//   - error: nil if successful, otherwise a parse error
+//   - *Module: The parsed module AST node with all properties organized.
+//     The Module struct contains the type, main properties (Map), and
+//     separate fields for arch/host/target/multilib/override properties.
+//   - error: nil if successful, otherwise a parse error with position information.
+//
+// Edge cases:
+//   - Empty module body ({}) is valid and produces a Module with no properties.
+//   - Special properties (arch, host, target, multilib) must have map values;
+//     otherwise, a syntax error is returned with a suggestion.
+//   - The "override" property, if present, must be a boolean value.
+//   - Multiple special properties of the same type are merged during parsing.
+//   - Regular properties and special properties can be interleaved in any order.
+//
+// Examples:
+//
+//	cc_binary {                              // typeName = "cc_binary"
+//	    name: "my_tool",                     // regular property
+//	    srcs: ["main.c"],                    // regular property
+//	    arch: { arm: { srcs: ["arm.c"] } }  // special property (extracted)
+//	}
 func (p *Parser) parseModule(typeName string, typePos scanner.Position) (*Module, error) {
 	// Current token is LBRACE - consume the opening brace
 	lbracePos := p.curToken.Pos
@@ -412,14 +500,41 @@ func (p *Parser) parseModule(typeName string, typePos scanner.Position) (*Module
 	return mod, nil
 }
 
-// parsePropertyList parses a list of properties: { property [, property] }
-// Properties are key-value pairs separated by commas. Trailing commas are allowed.
-// The parser reads properties until it encounters a closing brace (}).
+// parsePropertyList parses a list of properties inside braces: { property [, property] }
+//
+// Properties are key-value pairs separated by commas. Trailing commas are allowed
+// (e.g., "name: "a", srcs: ["b"]," is valid).
+// The parser reads properties until it encounters a closing brace (}) or EOF.
+//
+// Grammar:
+//
+//	PropertyList -> [ Property (COMMA Property)* [COMMA] ] RBRACE
+//
+// Parameters:
+//   - None (operates on parser's current token state).
+//     The parser must be positioned after the opening LBRACE when calling this method.
 //
 // Returns:
-//   - []*Property: List of parsed properties
-//   - scanner.Position: Position of the closing right brace
-//   - error: nil if successful, otherwise a parse error
+//   - []*Property: List of parsed properties in order of appearance.
+//     Empty slice if no properties are found before the closing brace.
+//   - scanner.Position: Position of the closing right brace (}).
+//     Valid only if parsing succeeded (no error returned).
+//   - error: nil if successful, otherwise a parse error.
+//     Errors include position information and suggestions for fixing syntax.
+//
+// Edge cases:
+//   - Empty property list ({}) is valid and returns an empty slice.
+//   - Trailing commas before the closing brace are allowed.
+//   - If neither comma nor closing brace is found after a property,
+//     returns an error pointing to the last property parsed.
+//   - If closing brace is missing at EOF, returns an error with suggestion.
+//   - Properties must be separated by commas; missing commas produce an error.
+//
+// Key design decisions:
+//   - Error position points to the last property when comma/brace is missing,
+//     helping users identify where the syntax error occurred.
+//   - The function does not consume the token after RBRACE;
+//     the caller is responsible for advancing past it if needed.
 func (p *Parser) parsePropertyList() ([]*Property, scanner.Position, error) {
 	properties := []*Property{}
 	var rbracePos scanner.Position
@@ -480,12 +595,41 @@ func (p *Parser) parsePropertyList() ([]*Property, scanner.Position, error) {
 }
 
 // parseProperty parses a single property: name : expression
-// A property consists of an identifier, followed by a colon, followed by an expression.
-// The expression can be a string, integer, boolean, list, map, variable, or select statement.
+//
+// A property consists of an identifier (the property name), followed by a colon,
+// followed by an expression (the property value). Properties appear inside
+// module definitions and map literals.
+//
+// Property names must be valid identifiers (not quoted strings).
+// The expression can be any valid expression type: string, integer, boolean,
+// list, map, variable reference, select statement, or exec_script call.
+//
+// Grammar:
+//
+//	Property -> IDENT COLON Expression
+//
+// Parameters:
+//   - None (operates on parser's current token state).
+//     The parser must be positioned at an IDENT token when calling this method.
 //
 // Returns:
-//   - *Property: The parsed property AST node
-//   - error: nil if successful, otherwise a parse error
+//   - *Property: The parsed property AST node.
+//     Contains the name, name position, value expression, and colon position.
+//   - error: nil if successful, otherwise a parse error with position information.
+//     Errors include line content and caret position for display.
+//
+// Edge cases:
+//   - Property name must be an IDENT token; quoted strings are not valid property names.
+//   - Missing colon after property name produces an error with suggestion.
+//   - The value expression can be any valid expression type.
+//   - Empty values (just colon) are not valid; parseExpression will fail.
+//
+// Examples:
+//
+//	name: "my_module"        -> string value
+//	srcs: ["a.c", "b.c"]    -> list value
+//	flags: "-Wall" + custom  -> expression with operator
+//	arch: { arm: {...} }     -> map value
 func (p *Parser) parseProperty() (*Property, error) {
 	if p.curToken.Type != IDENT {
 		return nil, errors.Syntax(fmt.Sprintf("expected property name (identifier), got %s", p.curToken.Type)).
@@ -526,18 +670,43 @@ func (p *Parser) parseProperty() (*Property, error) {
 }
 
 // parseAssignment parses an assignment statement: name (= | +=) expression
-// Assignments can be simple (=) or concatenative (+=).
-// For +=, the parser handles string and list concatenation differently during evaluation:
-// - String += appends to existing string
-// - List += appends to existing list (or creates new list)
+//
+// Assignments define variables that can be referenced later using ${var} syntax.
+// There are two types of assignment operators:
+//   - "=" (ASSIGN): Simple assignment, sets the variable to the expression value
+//   - "+=" (PLUSEQ): Concatenative assignment, appends to existing value
+//
+// For += assignments, the evaluator handles concatenation differently based on type:
+//   - String += String: Appends the right string to the left string
+//   - List += List: Appends elements of right list to left list
+//   - List += Non-list: Appends the single element to the list
+//   - Other combinations may cause evaluation errors
+//
+// Grammar:
+//
+//	Assignment -> IDENT (ASSIGN | PLUSEQ) Expression
 //
 // Parameters:
-//   - name: The variable name being assigned to
-//   - namePos: The source position of the variable name
+//   - name: The variable name being assigned to (already parsed by parseDefinition).
+//   - namePos: The source position of the variable name for error reporting.
 //
 // Returns:
-//   - *Assignment: The parsed assignment AST node
-//   - error: nil if successful, otherwise a parse error
+//   - *Assignment: The parsed assignment AST node.
+//     Contains the name, name position, assignment operator, equals position, and value.
+//   - error: nil if successful, otherwise a parse error with position information.
+//
+// Edge cases:
+//   - The operator must be either = or +=; other tokens produce an error.
+//   - The value expression can be any valid expression type.
+//   - Empty values (just operator, no expression) are caught by parseExpression.
+//   - Variable names are case-sensitive identifiers.
+//
+// Examples:
+//
+//	my_var = "hello"                  -> simple string assignment
+//	my_list = ["a", "b"]             -> list assignment
+//	my_list += ["c"]                  -> list concatenation
+//	flags = "-Wall" + extra_flags     -> expression assignment
 func (p *Parser) parseAssignment(name string, namePos scanner.Position) (*Assignment, error) {
 	assigner := "="
 	equalsPos := p.curToken.Pos
@@ -567,18 +736,44 @@ func (p *Parser) parseAssignment(name string, namePos scanner.Position) (*Assign
 	}, nil
 }
 
-// parseExpression parses any expression, including + operators.
-// This handles left-to-right associativity for the + operator.
-// For example, "a + b + c" is parsed as "(a + b) + c".
+// parseExpression parses an expression, handling the + operator for concatenation/addition.
 //
-// The + operator can perform:
-// - Integer addition (int64 + int64)
-// - String concatenation (string + string)
-// - List concatenation (list + list)
+// This is the entry point for parsing all expression types. It first parses
+// a primary expression (left side), then checks for + operators to handle
+// binary operations with left-to-right associativity.
+//
+// The + operator can perform different operations depending on the types:
+//   - Integer + Integer: Arithmetic addition (int64 + int64)
+//   - String + String: String concatenation (string + string)
+//   - List + List: List concatenation (list + list)
+//   - Other combinations: May cause evaluation errors later
+//
+// Examples:
+//
+//	"hello" + "world"      -> string concatenation
+//	1 + 2                  -> integer addition (3)
+//	["a"] + ["b"]          -> list concatenation (["a", "b"])
+//	a + b + c              -> parsed as "(a + b) + c" (left-to-right)
+//
+// Grammar:
+//
+//	Expression -> Primary (PLUS Primary)*
+//
+// Parameters:
+//   - None (operates on parser's current token state).
 //
 // Returns:
-//   - Expression: The parsed expression AST node
-//   - error: nil if successful, otherwise a parse error
+//   - Expression: The parsed expression AST node.
+//     Can be a simple expression (string, int, etc.) or an Operator node
+//     if + operators were present.
+//   - error: nil if successful, otherwise a parse error.
+//
+// Edge cases:
+//   - A single primary expression without + operator returns just that expression.
+//   - Multiple + operators are left-associative: "a + b + c" = "(a + b) + c".
+//   - The + operator must be followed by a valid primary expression;
+//     otherwise, parsePrimary() will return an error.
+//   - Type checking of operands is done during evaluation, not parsing.
 func (p *Parser) parseExpression() (Expression, error) {
 	left, err := p.parsePrimary()
 	if err != nil {
@@ -607,18 +802,50 @@ func (p *Parser) parseExpression() (Expression, error) {
 	return left, nil
 }
 
-// parsePrimary parses a single primary expression (no operators).
-// Primary expressions are the base units that cannot be broken down further:
-//   - STRING: Quoted string literals
-//   - INT: Integer literals
-//   - BOOL: Boolean literals (true/false)
-//   - LBRACKET: List expressions [expr, ...]
-//   - LBRACE: Map expressions { prop: value, ... }
-//   - IDENT: Either the "select" keyword or a variable reference
+// parsePrimary parses a single primary expression (the base unit, no operators).
+//
+// Primary expressions are the building blocks of all expressions.
+// They cannot be broken down further by the expression parser.
+//
+// Token types and their corresponding parse functions:
+//   - STRING: Quoted string literals -> parseString()
+//   - INT: Integer literals -> parseInt()
+//   - BOOL: Boolean literals (true/false) -> parseBool()
+//   - LBRACKET: List expressions [expr, ...] -> parseList()
+//   - LBRACE: Map expressions { prop: value, ... } -> parseMap()
+//   - IDENT: Either "select" keyword, "exec_script" keyword, or variable reference
+//   - UNSET: Unset keyword for removing property values -> returns Unset node
+//
+// Grammar:
+//
+//	Primary -> STRING | INT | BOOL | LBRACKET List | LBRACE Map | IDENT | UNSET
+//
+// Parameters:
+//   - None (operates on parser's current token state).
 //
 // Returns:
-//   - Expression: The parsed primary expression
-//   - error: nil if successful, otherwise a parse error
+//   - Expression: The parsed primary expression AST node.
+//     The actual type depends on the token: *String, *Int64, *Bool, *List,
+//     *Map, *Variable, *Select, *ExecScript, or *Unset.
+//   - error: nil if successful, otherwise a parse error with position information.
+//
+// Edge cases:
+//   - For IDENT tokens, special handling for "select" and "exec_script" keywords.
+//   - Unknown IDENT tokens are treated as variable references (resolved during evaluation).
+//   - The UNSET keyword creates an Unset node (used to clear property values).
+//   - Unexpected token types produce an error with suggestion for valid expressions.
+//
+// Examples:
+//
+//	"hello"           -> *String
+//	42                -> *Int64
+//	true              -> *Bool
+//	["a", "b"]        -> *List
+//	{key: "value"}    -> *Map
+//	my_var            -> *Variable
+//	select(...)       -> *Select
+//	exec_script(...)  -> *ExecScript
+//	unset             -> *Unset
 func (p *Parser) parsePrimary() (Expression, error) {
 	switch p.curToken.Type {
 	case STRING:
@@ -654,14 +881,38 @@ func (p *Parser) parsePrimary() (Expression, error) {
 	}
 }
 
-// parseString parses a string literal.
+// parseString parses a string literal token.
+//
 // String literals are surrounded by quotes and may contain escape sequences.
 // The parser removes the quotes and processes escape sequences using strconv.Unquote.
-// Both single-quoted and double-quoted strings are supported, as well as raw strings.
+// Both single-quoted ('...') and double-quoted ("...") strings are supported,
+// as well as raw strings (if supported by the lexer).
+//
+// Grammar:
+//
+//	String -> STRING
+//
+// Parameters:
+//   - None (operates on parser's current token state).
+//     The parser must be positioned at a STRING token when calling this method.
 //
 // Returns:
-//   - *String: The parsed string AST node
-//   - error: nil if successful, otherwise a parse error (e.g., unterminated string)
+//   - *String: The parsed string AST node.
+//     Contains the unquoted string value and the position of the literal.
+//   - error: nil if successful, otherwise a parse error.
+//     Errors can occur if the string literal is malformed (e.g., unterminated quotes).
+//
+// Edge cases:
+//   - Escape sequences (e.g., \n, \t, \") are processed by strconv.Unquote.
+//   - Empty strings ("") are valid and produce a String with empty value.
+//   - Malformed escape sequences cause an error with position information.
+//   - The token is consumed (nextToken called) after parsing.
+//
+// Examples:
+//
+//	"hello"       -> String{Value: "hello"}
+//	'world'       -> String{Value: "world"} (if single quotes supported)
+//	"hello\n"     -> String{Value: "hello\n"} (with newline)
 func (p *Parser) parseString() (*String, error) {
 	pos := p.curToken.Pos
 	literal := p.curToken.Literal
@@ -683,13 +934,37 @@ func (p *Parser) parseString() (*String, error) {
 	}, nil
 }
 
-// parseInt parses an integer literal.
-// Integer literals are base-10 numbers that are parsed into int64 values.
-// They can be positive or negative.
+// parseInt parses an integer literal token.
+//
+// Integer literals are base-10 numbers (optionally negative) that are parsed
+// into int64 values. The parser uses strconv.ParseInt with base 10 and 64-bit width.
+//
+// Grammar:
+//
+//	Int -> INT
+//
+// Parameters:
+//   - None (operates on parser's current token state).
+//     The parser must be positioned at an INT token when calling this method.
 //
 // Returns:
-//   - *Int64: The parsed integer AST node
-//   - error: nil if successful, otherwise a parse error (e.g., overflow)
+//   - *Int64: The parsed integer AST node.
+//     Contains the int64 value and the position of the literal.
+//   - error: nil if successful, otherwise a parse error.
+//     Errors can occur if the literal overflows int64 or has invalid format.
+//
+// Edge cases:
+//   - Negative numbers are supported (lexer produces a single token for "-123").
+//   - Leading zeros are allowed (e.g., "007" parses to 7).
+//   - Overflow beyond int64 range causes a parse error.
+//   - The token is consumed (nextToken called) after parsing.
+//
+// Examples:
+//
+//	42      -> Int64{Value: 42}
+//	-1      -> Int64{Value: -1}
+//	0       -> Int64{Value: 0}
+//	9999999999999999999  -> error (overflow)
 func (p *Parser) parseInt() (*Int64, error) {
 	pos := p.curToken.Pos
 	literal := p.curToken.Literal
@@ -711,10 +986,24 @@ func (p *Parser) parseInt() (*Int64, error) {
 }
 
 // parseBool parses a boolean literal.
+//
 // Boolean literals are the keywords "true" and "false".
+// They are case-sensitive and must be lowercase as written in the Blueprint source.
+//
+// Parameters:
+//   - None (operates on parser's current token state).
+//     The parser must be positioned at a BOOL token when calling this method.
 //
 // Returns:
-//   - *Bool: The parsed boolean AST node
+//   - *Bool: The parsed boolean AST node containing the boolean value and position.
+//     Returns true if the literal was "true", false if "false".
+//   - error: This function never returns an error.
+//     Both "true" and "false" are valid boolean literals.
+//
+// Edge cases:
+//   - The BOOL token type is only created for the exact strings "true" or "false"
+//     by the lexer, so no validation is needed here.
+//   - The token is consumed (nextToken called) after reading the literal.
 func (p *Parser) parseBool() (*Bool, error) {
 	pos := p.curToken.Pos
 	literal := p.curToken.Literal
@@ -727,12 +1016,32 @@ func (p *Parser) parseBool() (*Bool, error) {
 }
 
 // parseVariable parses a variable reference.
+//
 // A variable reference is an identifier that refers to a previously defined variable
-// or assignment. During evaluation, the variable's value will be substituted
-// for the reference.
+// or assignment. During evaluation (not during parsing), the variable's value will
+// be substituted for the reference.
+//
+// Variable references appear in expressions and can be used in property values,
+// select() conditions, and other expression contexts. They are resolved by the
+// evaluator using the assignments collected from the parsed definitions.
+//
+// Parameters:
+//   - None (operates on parser's current token state).
+//     The parser must be positioned at an IDENT token that is not "select" or "exec_script".
 //
 // Returns:
-//   - *Variable: The parsed variable reference AST node
+//   - *Variable: The parsed variable reference AST node.
+//     Contains the variable name and its source position.
+//   - error: This function never returns an error.
+//     Any IDENT token is a valid variable reference (validation happens during evaluation).
+//
+// Edge cases:
+//   - The identifier "select" and "exec_script" are handled separately by parsePrimary()
+//     and will not reach this function under normal flow.
+//   - Variables are not validated during parsing; undefined variables are caught
+//     during the evaluation phase (when processing assignments and module properties).
+//   - Variable names are case-sensitive and follow the same rules as identifiers
+//     in the lexer (letters, digits, underscore; must start with letter or underscore).
 func (p *Parser) parseVariable() (*Variable, error) {
 	pos := p.curToken.Pos
 	name := p.curToken.Literal
@@ -744,13 +1053,43 @@ func (p *Parser) parseVariable() (*Variable, error) {
 	}, nil
 }
 
-// parseList parses a list: [ expression [, expression] ]
+// parseList parses a list literal: [ expression [, expression] ]
+//
 // Lists are ordered collections of expressions, separated by commas.
-// Trailing commas are allowed.
+// Trailing commas are allowed (e.g., ["a", "b",] is valid).
+// List elements can be any valid expression: strings, integers, booleans,
+// other lists, maps, variables, or select() statements.
+//
+// Grammar:
+//
+//	List -> LBRACKET [ Expression (COMMA Expression)* [COMMA] ] RBRACKET
+//
+// Parameters:
+//   - None (operates on parser's current token state).
+//     The parser must be positioned at a LBRACKET token when calling this method.
 //
 // Returns:
-//   - *List: The parsed list AST node
-//   - error: nil if successful, otherwise a parse error
+//   - *List: The parsed list AST node containing all element expressions.
+//     The LBracePos and RBracePos fields store the positions of '[' and ']'.
+//   - error: nil if successful, otherwise a parse error.
+//     Errors include position information and suggestions for fixing syntax.
+//
+// Edge cases:
+//   - Empty list ([]) is valid and returns a List with empty Values slice.
+//   - Trailing commas before the closing bracket are allowed.
+//   - Single-element lists don't require a trailing comma.
+//   - Nested lists are supported (lists can contain other lists as elements).
+//   - If the closing bracket is missing, returns an error with suggestion.
+//   - If neither comma nor closing bracket is found after an element,
+//     returns an error indicating the syntax issue.
+//
+// Examples:
+//
+//	[]                  -> empty list
+//	["a"]               -> single element
+//	["a", "b"]          -> multiple elements
+//	["a", "b",]         -> trailing comma allowed
+//	[1, [2, 3], "c"]   -> nested lists supported
 func (p *Parser) parseList() (*List, error) {
 	lbracePos := p.curToken.Pos
 	p.nextToken()
@@ -802,13 +1141,42 @@ func (p *Parser) parseList() (*List, error) {
 	}, nil
 }
 
-// parseMap parses a map: { property_list }
+// parseMap parses a map literal: { property_list }
+//
 // Maps are collections of key-value pairs enclosed in braces.
-// They share the same syntax as property lists, so parsePropertyList is reused.
+// They share the same syntax as property lists inside module definitions,
+// so the internal parsePropertyList() function is reused.
+//
+// Maps can be used as values in assignments or properties:
+//
+//	my_map = { key1: "value1", key2: "value2" }
+//
+// Grammar:
+//
+//	Map -> LBRACE PropertyList RBRACE
+//
+// Parameters:
+//   - None (operates on parser's current token state).
+//     The parser must be positioned at a LBRACE token when calling this method.
 //
 // Returns:
-//   - *Map: The parsed map AST node
-//   - error: nil if successful, otherwise a parse error
+//   - *Map: The parsed map AST node containing the property list.
+//     The LBracePos and RBracePos fields store the positions of '{' and '}'.
+//   - error: nil if successful, otherwise a parse error.
+//
+// Edge cases:
+//   - Empty map ({}) is valid and returns a Map with empty Properties slice.
+//   - Trailing commas before the closing brace are allowed.
+//   - Map keys must be identifiers (not quoted strings).
+//   - Map values can be any valid expression.
+//   - Duplicate keys in the same map are allowed at parse time;
+//     handling duplicates is done during evaluation.
+//
+// Key design decisions:
+//   - Reusing parsePropertyList() avoids duplicating the property parsing logic.
+//     This works because maps and module property lists have identical syntax.
+//   - Maps are represented as *Map with Properties slice, same as the internal
+//     structure of a Module, allowing code reuse in the evaluator.
 func (p *Parser) parseMap() (*Map, error) {
 	lbracePos := p.curToken.Pos
 	p.nextToken()
@@ -825,18 +1193,25 @@ func (p *Parser) parseMap() (*Map, error) {
 	}, nil
 }
 
-// parseSelect parses a select expression: select(conditions, { cases })
-// Select is a conditional expression that chooses values based on configuration.
-// The syntax is: select(condition, { pattern1: value1, pattern2: value2, ... })
-// The first argument is a condition (like "arch", "os", "host") or a variable.
-// The second argument is a map of patterns to values. The "default" pattern is used
-// when no other pattern matches.
+// parseSelect parses a select() conditional expression.
 //
-// Select also supports:
-// - Tuple conditions: select((arch(), os()), { ... }) for multi-condition matching
-// - Unset patterns: select(arch(), { unset: value })
-// - Any patterns: select(arch(), { any: value }) or select(arch(), { any @var: value })
-// - Any @var binding: Binds the matched value to a variable for use in the result
+// Select is a powerful conditional expression that chooses values based on
+// configuration conditions. It evaluates condition functions (like arch(), os())
+// and matches the result against case patterns to determine the value.
+//
+// Syntax:
+//
+//	select(condition, { pattern1: value1, pattern2: value2, ..., default: value })
+//
+// The first argument is a condition or tuple of conditions.
+// The second argument is a map of patterns to values. The "default" pattern
+// is used when no other pattern matches.
+//
+// Select supports several advanced features:
+//   - Tuple conditions: select((arch(), os()), { ... }) for multi-condition matching
+//   - Unset patterns: select(arch(), { unset: value }) matches when config is not set
+//   - Any patterns: select(arch(), { any: value }) matches any value
+//   - Any @var binding: select(arch(), { any @var: value }) binds matched value to variable
 //
 // Example usage:
 //
@@ -847,11 +1222,26 @@ func (p *Parser) parseMap() (*Map, error) {
 //	})
 //
 // Parameters:
-//   - None (uses parser state)
+//   - None (operates on parser's current token state).
+//     The parser must be positioned at a "select" IDENT token when calling this method.
 //
 // Returns:
-//   - *Select: The parsed select AST node
-//   - error: nil if successful, otherwise a parse error
+//   - *Select: The parsed select AST node.
+//     Contains keyword position, conditions array, brace positions, and cases.
+//   - error: nil if successful, otherwise a parse error with position information.
+//
+// Edge cases:
+//   - Missing parentheses after "select" produces an error.
+//   - Tuple conditions are enclosed in double parentheses: select((a(), b()), {...})
+//   - The "default" pattern is a special case that matches when nothing else does.
+//   - The "unset" pattern matches when the condition evaluates to nil or empty.
+//   - The "any" pattern matches any value; with @var it binds the value to a variable.
+//
+// Key design decisions:
+//   - Conditions are parsed first, then cases, allowing the parser to know
+//     if it's a tuple select (affecting how cases are parsed).
+//   - Case patterns can be simple (one pattern) or tuple (multiple patterns)
+//     depending on whether the select has multiple conditions.
 func (p *Parser) parseSelect() (*Select, error) {
 	keywordPos := p.curToken.Pos
 	p.nextToken()
@@ -948,9 +1338,12 @@ func (p *Parser) parseSelect() (*Select, error) {
 	}, nil
 }
 
-// parseExecScript parses an exec_script() call for running scripts during configuration.
-// The script is executed during Blueprint parsing/evaluation, not during ninja build.
-// Supports an optional list of arguments.
+// parseExecScript parses an exec_script() call for running external scripts during configuration.
+//
+// The exec_script() function allows Blueprint files to run external scripts
+// during the parsing/evaluation phase (not during the ninja build phase).
+// The script is executed with the provided arguments, and its output can be
+// used in variable assignments or expressions.
 //
 // Grammar:
 //
@@ -960,10 +1353,28 @@ func (p *Parser) parseSelect() (*Select, error) {
 //
 //	exec_script("detect_arch.sh")
 //	exec_script("get_flag.sh", "arg1", "arg2")
+//	exec_script("config.sh", "--prefix=/usr")
+//
+// Parameters:
+//   - None (operates on parser's current token state).
+//     The parser must be positioned at an "exec_script" IDENT token when calling this method.
 //
 // Returns:
-//   - *ExecScript: The parsed exec_script AST node
-//   - error: nil if successful, otherwise a parse error
+//   - *ExecScript: The parsed exec_script AST node.
+//     Contains keyword position, command expression, and optional arguments.
+//   - error: nil if successful, otherwise a parse error with position information.
+//
+// Edge cases:
+//   - The command (first argument) is required; missing parentheses produce an error.
+//   - Optional arguments are comma-separated expressions after the command.
+//   - The closing parenthesis is required; missing produces an error.
+//   - The script execution happens during evaluation, not during parsing.
+//     This function only parses the syntax, not executes the script.
+//
+// Key design decisions:
+//   - Arguments are parsed as expressions to allow variable references and string concatenation.
+//   - The command itself is an expression, allowing dynamic script names (though unusual).
+//   - Execution is deferred to evaluation phase for better error handling and caching.
 func (p *Parser) parseExecScript() (*ExecScript, error) {
 	keywordPos := p.curToken.Pos
 	p.nextToken()
@@ -1013,23 +1424,47 @@ func (p *Parser) parseExecScript() (*ExecScript, error) {
 	}, nil
 }
 
-// parseConfigurableCondition parses a condition for select.
-// Conditions can be simple identifiers (like "arch", "os") or function calls
-// with arguments (like "target(android)").
+// parseConfigurableCondition parses a condition function call for select() statements.
+//
+// Conditions determine what value to match against in select() cases.
+// They can be simple identifiers (like "arch", "os") or function calls
+// with arguments (like "target(android)", "product_variable(my_var)").
 //
 // Built-in condition functions:
-// - arch(): Current architecture (arm, arm64, x86, x86_64)
-// - os(): Current operating system (linux, android, darwin)
-// - host(): Whether building for host
-// - target(): Target platform
-// - variant(): Build variant (debug, release)
-// - product_variable(): Product-specific variable
-// - soong_config_variable(): Configuration variable from namespace
-// - release_flag(): Release flag check
+//   - arch(): Current architecture (arm, arm64, x86, x86_64)
+//   - os(): Current operating system (linux, android, darwin, windows)
+//   - host(): Whether building for the host machine (true/false)
+//   - target(): Target platform identifier
+//   - variant(): Build variant (debug, release, eng)
+//   - product_variable(): Product-specific variable lookup
+//   - soong_config_variable(): Configuration variable from Soong namespace
+//   - release_flag(): Release flag check (true/false)
+//
+// Grammar:
+//
+//	ConfigurableCondition -> IDENT [(Expression (COMMA Expression)*)]
+//
+// Parameters:
+//   - None (operates on parser's current token state).
+//     The parser must be positioned at an IDENT token when calling this method.
 //
 // Returns:
-//   - ConfigurableCondition: The parsed condition
-//   - error: nil if successful, otherwise a parse error
+//   - ConfigurableCondition: The parsed condition with function name, position, and arguments.
+//     If no parentheses follow, Args will be empty.
+//   - error: nil if successful, otherwise a parse error with position information.
+//
+// Edge cases:
+//   - Condition names must be valid identifiers (not quoted strings).
+//   - Arguments inside parentheses are optional; bare identifiers are valid (e.g., "arch").
+//   - Arguments are parsed as expressions, allowing variables and string literals.
+//   - Missing closing parenthesis after arguments produces an error.
+//   - Empty parentheses "func()" are valid and produce an empty Args slice.
+//
+// Examples:
+//
+//	arch          -> ConfigurableCondition{FunctionName: "arch", Args: []}
+//	arch()        -> ConfigurableCondition{FunctionName: "arch", Args: []}
+//	target(android) -> ConfigurableCondition{FunctionName: "target", Args: [...]}
 func (p *Parser) parseConfigurableCondition() (ConfigurableCondition, error) {
 	if p.curToken.Type != IDENT {
 		return ConfigurableCondition{}, errors.Syntax("expected identifier for condition").
@@ -1067,17 +1502,39 @@ func (p *Parser) parseConfigurableCondition() (ConfigurableCondition, error) {
 	}, nil
 }
 
-// parseSelectCase parses a single case in a select statement.
-// A case consists of one or more patterns separated by commas, followed by a colon
-// and a value expression. Multiple patterns can map to the same value.
-// Example: "linux", "android": ["unix.c"]
+// parseSelectCase parses a single case in a select() statement.
+//
+// A case consists of one or more patterns (comma-separated) followed by a colon
+// and a value expression. Multiple patterns can map to the same value,
+// allowing concise handling of multiple matching conditions.
+//
+// Examples:
+//
+//	"linux": ["unix.c"]                  -> single pattern
+//	"linux", "android": ["unix.c"]       -> multiple patterns, same value
+//	(default): ["default.c"]              -> tuple pattern (when isTuple is true)
 //
 // Parameters:
-//   - isTuple: True if this is a tuple select (multiple conditions)
+//   - isTuple: True if the parent select() has multiple conditions (tuple select).
+//     When true, patterns are parsed as tuples enclosed in parentheses.
+//     When false, patterns are simple (single values or comma-separated).
 //
 // Returns:
-//   - SelectCase: The parsed case
-//   - error: nil if successful, otherwise a parse error
+//   - SelectCase: The parsed case with patterns and value.
+//     Patterns slice contains one or more SelectPattern values.
+//     Value is the expression to return when any pattern matches.
+//   - error: nil if successful, otherwise a parse error with position information.
+//
+// Edge cases:
+//   - At least one pattern is required before the colon.
+//   - Multiple patterns are separated by commas without parentheses (for simple select).
+//   - For tuple select (isTuple=true), patterns are enclosed in parentheses: (arm, linux): value
+//   - The colon and value expression are required after patterns.
+//
+// Key design decisions:
+//   - The isTuple parameter avoids having to re-parse or look ahead to determine
+//     if parentheses are needed around patterns.
+//   - Delegates to parseTupleSelectCase() or parseSimpleSelectCase() based on isTuple.
 func (p *Parser) parseSelectCase(isTuple bool) (SelectCase, error) {
 	// Handle tuple patterns (multiple values in parentheses)
 	if isTuple && p.curToken.Type == LPAREN {
@@ -1086,13 +1543,43 @@ func (p *Parser) parseSelectCase(isTuple bool) (SelectCase, error) {
 	return p.parseSimpleSelectCase()
 }
 
-// parseTupleSelectCase parses a tuple case in a select statement.
-// A tuple case has multiple patterns enclosed in parentheses, e.g., (arm, linux): value.
-// This is used when select() has multiple conditions.
+// parseTupleSelectCase parses a tuple case in a select() statement.
+//
+// A tuple case has multiple patterns enclosed in parentheses, matching multiple
+// conditions in a select() with tuple conditions.
+//
+// Syntax:
+//
+//	( pattern1, pattern2, ... ): value
+//
+// This is used when select() has multiple conditions, e.g.:
+//
+//	select((arch(), os()), {
+//	    (arm, linux): ["arm_linux.c"],
+//	    (arm64, android): ["arm64_android.c"],
+//	})
+//
+// Parameters:
+//   - None (operates on parser's current token state).
+//     The parser must be positioned at a LPAREN token when calling this method.
 //
 // Returns:
-//   - SelectCase: The parsed case with tuple patterns and a value
-//   - error: nil if successful, otherwise a parse error
+//   - SelectCase: The parsed case with tuple patterns and a value.
+//     Patterns slice contains SelectPattern values for each tuple element.
+//     ColonPos stores the position of the colon after the tuple.
+//     Value is the expression to return when all patterns match.
+//   - error: nil if successful, otherwise a parse error with position information.
+//
+// Edge cases:
+//   - At least one pattern is required inside the parentheses.
+//   - Patterns are separated by commas.
+//   - The closing parenthesis after patterns is required.
+//   - The colon and value expression are required after the tuple.
+//
+// Examples:
+//
+//	(arm, linux): ["arm_linux.c"]     -> tuple with 2 patterns
+//	(x86_64,): ["x64.c"]             -> tuple with trailing comma (if supported)
 func (p *Parser) parseTupleSelectCase() (SelectCase, error) {
 	if p.curToken.Type != LPAREN {
 		return SelectCase{}, errors.Syntax("expected '(' for tuple pattern in select case").
@@ -1144,12 +1631,38 @@ func (p *Parser) parseTupleSelectCase() (SelectCase, error) {
 }
 
 // parseSimpleSelectCase parses a simple (non-tuple) case in a select statement.
-// A simple case has one or more patterns separated by commas, then a colon, then a value.
-// Multiple patterns can map to the same value (e.g., "linux", "android": ["unix.c"]).
+//
+// A simple case has one or more patterns separated by commas, followed by a colon
+// and a value expression. Multiple patterns can map to the same value,
+// allowing concise handling of multiple matching conditions.
+//
+// Examples:
+//
+//	"linux": ["unix.c"]                    -> single pattern
+//	"linux", "android": ["unix.c"]         -> multiple patterns, same value
+//	"arm", "arm64": ["arm_common.c"]       -> multiple architectures
+//	default: ["common.c"]                  -> default pattern
+//
+// Parameters:
+//   - None (operates on parser's current token state).
+//     The parser must be positioned at the first pattern token when calling this method.
 //
 // Returns:
-//   - SelectCase: The parsed case with one or more patterns and a value
-//   - error: nil if successful, otherwise a parse error
+//   - SelectCase: The parsed case with one or more patterns and a value.
+//     Patterns slice contains SelectPattern values for each pattern.
+//     ColonPos stores the position of the colon after the patterns.
+//     Value is the expression to return when any pattern matches.
+//   - error: nil if successful, otherwise a parse error with position information.
+//
+// Edge cases:
+//   - At least one pattern is required before the colon.
+//   - Multiple patterns are separated by commas (no parentheses).
+//   - The colon and value expression are required after the patterns.
+//   - Patterns can be any valid expression: strings, variables, "default", "unset", "any".
+//
+// Key design decisions:
+//   - Multiple patterns mapping to the same value avoids duplicating the value expression.
+//   - The function accumulates patterns in a slice until it finds a colon.
 func (p *Parser) parseSimpleSelectCase() (SelectCase, error) {
 	// Parse first pattern
 	pattern, err := p.parseSelectPattern()
@@ -1190,18 +1703,43 @@ func (p *Parser) parseSimpleSelectCase() (SelectCase, error) {
 	}, nil
 }
 
-// parseSelectPattern parses a single pattern in a select case.
-// A pattern is an expression that is compared against the condition value.
-// Common patterns include string literals (e.g., "linux"), integer literals,
-// boolean literals, variable references like "default", or special keywords:
+// parseSelectPattern parses a single pattern in a select() case.
 //
-// - unset: Matches when configuration is not set or empty
-// - any: Matches any value (wildcard)
-// - any @ var: Matches any value and binds it to a variable
+// A pattern is an expression that is compared against the condition value
+// during evaluation. Patterns can be literals (strings, integers, booleans),
+// variable references, or special keywords.
+//
+// Special pattern types:
+//   - "unset": Matches when the configuration value is not set or empty
+//   - "any": Matches any value (wildcard)
+//   - "any" @ var: Matches any value and binds it to a variable for use in the value expression
+//   - @var: Shorthand for "any @ var" (bind matched value to variable)
+//
+// Regular patterns are parsed as expressions (strings, integers, booleans, variables).
+//
+// Parameters:
+//   - None (operates on parser's current token state).
 //
 // Returns:
-//   - SelectPattern: The parsed pattern
-//   - error: nil if successful, otherwise a parse error
+//   - SelectPattern: The parsed pattern.
+//     Contains the pattern value (Expression), IsAny flag for "any" patterns,
+//     and optional Binding for "@var" patterns.
+//   - error: nil if successful, otherwise a parse error with position information.
+//
+// Edge cases:
+//   - UNSET keyword creates an Unset node as the pattern value.
+//   - AT token (@) followed by IDENT creates a binding pattern (any @ var).
+//   - "any" followed by AT creates a binding pattern (any @ var).
+//   - Other IDENT tokens are treated as expressions (parsed via parseExpression).
+//   - Default pattern is typically a string literal "default".
+//
+// Examples:
+//
+//	"linux"           -> SelectPattern{Value: String{"linux"}}
+//	unset             -> SelectPattern{Value: Unset{}}
+//	any               -> SelectPattern{Value: Variable{"any"}, IsAny: true}
+//	any @arch         -> SelectPattern{Value: Variable{"any"}, IsAny: true, Binding: "arch"}
+//	@myvar            -> SelectPattern{Value: Variable{"any"}, IsAny: true, Binding: "myvar"}
 func (p *Parser) parseSelectPattern() (SelectPattern, error) {
 	switch p.curToken.Type {
 	case UNSET:
@@ -1247,15 +1785,27 @@ func (p *Parser) parseSelectPattern() (SelectPattern, error) {
 
 // ParseFile parses a Blueprint file from an io.Reader.
 // This is a convenience function that creates a parser and parses the entire file.
-// It handles all the setup工作和错误处理 so callers don't need to deal with the parser directly.
+// It handles all setup work and error handling so callers don't need to deal with the parser directly.
 //
 // Parameters:
-//   - r: The input reader containing Blueprint source code
-//   - fileName: The name of the file (used for error messages)
+//   - r: The input io.Reader containing Blueprint source code.
+//     If nil, the source parameter is used to create a reader (if provided).
+//   - fileName: The name of the file being parsed (used for error messages and source mapping).
+//   - source: Optional variadic string containing the raw source code.
+//     If provided, it is used for error reporting (displaying line content) and as a fallback
+//     if the reader is nil. Only the first element is used if multiple are provided.
 //
 // Returns:
-//   - *File: The parsed AST
-//   - error: nil if successful, otherwise the first error encountered
+//   - *File: The parsed AST representation of the Blueprint file.
+//     May contain partially parsed definitions if errors were encountered.
+//   - error: nil if parsing succeeded with no errors; otherwise the first error encountered.
+//     Note: Multiple parse errors are aggregated during parsing, but only the first is returned here.
+//
+// Edge cases:
+//   - If r is nil and no source is provided, returns an error indicating the reader is invalid.
+//   - If r is nil but source is provided, a strings.NewReader is created from source[0].
+//   - Empty input returns a valid File with no definitions.
+//   - Lexer errors are included in the aggregated parse errors.
 func ParseFile(r io.Reader, fileName string, source ...string) (*File, error) {
 	if r == nil {
 		if len(source) > 0 {
@@ -1272,8 +1822,28 @@ func ParseFile(r io.Reader, fileName string, source ...string) (*File, error) {
 	return file, nil
 }
 
-// lineContent returns the content of the specified line (1-indexed).
-// Returns empty string if line number is out of range or source is not available.
+// lineContent returns the content of the specified line (1-indexed) from the source text.
+// This is used to provide context in error messages, allowing users to see the
+// exact line of code that caused a parse error.
+//
+// The function splits the stored source text by newline characters and returns
+// the requested line. Line numbers are 1-indexed to match typical text editor
+// line numbering and scanner position reporting.
+//
+// Parameters:
+//   - line: The 1-indexed line number to retrieve.
+//     Line 1 corresponds to the first line of the source file.
+//
+// Returns:
+//   - string: The content of the specified line, without the trailing newline character.
+//     Returns empty string if the line number is out of range or source is not available.
+//
+// Edge cases:
+//   - If p.source is empty (not provided during parser creation), returns empty string.
+//   - If line is <= 0, returns empty string (line numbers are 1-indexed).
+//   - If line exceeds the number of lines in the source, returns empty string.
+//   - Trailing newline characters are stripped by strings.Split behavior
+//     (the last line may or may not have a trailing newline depending on the input).
 func (p *Parser) lineContent(line int) string {
 	if p.source == "" || line <= 0 {
 		return ""
@@ -1285,8 +1855,17 @@ func (p *Parser) lineContent(line int) string {
 	return lines[line-1]
 }
 
-// init is called to initialize the parser package.
-// Currently a no-op but may be used for future setup.
+// init is called when the parser package is imported.
+//
+// Currently a no-op but reserved for future package-level initialization.
+// Possible future uses:
+//   - Initializing lexer keyword tables
+//   - Registering built-in functions for select() conditions
+//   - Setting up any package-level state
+//
+// Note: Package initialization is automatic in Go; this function is called
+// before any other code in the package is executed.
 func init() {
 	// Reserved for package initialization
+	// No initialization needed currently
 }

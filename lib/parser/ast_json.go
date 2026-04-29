@@ -656,10 +656,13 @@ func (l *List) UnmarshalJSON(data []byte) error {
 	}
 	l.LBracePos = stringToPos(aux.LBracePos)
 	l.RBracePos = stringToPos(aux.RBracePos)
+	// Pre-allocate slice with exact capacity to avoid multiple allocations during append.
+	// Each element will be populated by unmarshalExpression which handles polymorphic types.
 	l.Values = make([]Expression, len(aux.Values))
 	for i, raw := range aux.Values {
 		expr, err := unmarshalExpression(raw)
 		if err != nil {
+			// Propagate parse error immediately; partial list is invalid.
 			return err
 		}
 		l.Values[i] = expr
@@ -1134,10 +1137,13 @@ func (c *ConfigurableCondition) UnmarshalJSON(data []byte) error {
 	}
 	c.Position = stringToPos(aux.Position)
 	c.FunctionName = aux.FunctionName
+	// Pre-allocate Args slice to avoid multiple allocations.
+	// Each argument is an Expression that needs polymorphic deserialization.
 	c.Args = make([]Expression, len(aux.Args))
 	for i, raw := range aux.Args {
 		expr, err := unmarshalExpression(raw)
 		if err != nil {
+			// Propagate error; partial condition is invalid.
 			return err
 		}
 		c.Args[i] = expr
@@ -1477,6 +1483,8 @@ func (e *ExecScript) UnmarshalJSON(data []byte) error {
 	}
 	e.KeywordPos = stringToPos(aux.KeywordPos)
 
+	// Deserialize command expression if present.
+	// Command is optional in JSON (omitempty not used, but nil handled here).
 	if len(aux.Command) > 0 {
 		cmd, err := unmarshalExpression(aux.Command)
 		if err != nil {
@@ -1485,6 +1493,8 @@ func (e *ExecScript) UnmarshalJSON(data []byte) error {
 		e.Command = cmd
 	}
 
+	// Deserialize args slice if present.
+	// Use append to build slice since Args may be nil and we want to preserve that.
 	if len(aux.Args) > 0 {
 		e.Args = make([]Expression, 0, len(aux.Args))
 		for _, raw := range aux.Args {
@@ -1576,10 +1586,14 @@ func (f *File) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	f.Name = aux.Name
+	// Pre-allocate Defs slice with exact length to avoid reallocations.
+	// Each element will be deserialized using unmarshalDefinition which handles
+	// polymorphic definition types (Module vs Assignment).
 	f.Defs = make([]Definition, len(aux.Defs))
 	for i, raw := range aux.Defs {
 		def, err := unmarshalDefinition(raw)
 		if err != nil {
+			// Propagate error immediately; partial file is invalid.
 			return err
 		}
 		f.Defs[i] = def
@@ -1624,10 +1638,15 @@ func (f *File) UnmarshalJSON(data []byte) error {
 //   - Invalid JSON format returns parse error
 //   - Each type's UnmarshalJSON method may return its own errors
 func unmarshalExpression(raw json.RawMessage) (Expression, error) {
+	// Early return for empty input to avoid unnecessary JSON parsing.
+	// Empty raw bytes typically indicate a null or missing value in the parent struct.
 	if len(raw) == 0 {
 		return nil, nil
 	}
 
+	// Extract the "type" field first to determine the concrete expression type.
+	// Using a separate unmarshal step avoids parsing the entire JSON multiple times
+	// and allows polymorphic deserialization based on the "type" field.
 	aux := &struct {
 		Type string `json:"type"`
 	}{}
@@ -1635,6 +1654,9 @@ func unmarshalExpression(raw json.RawMessage) (Expression, error) {
 		return nil, err
 	}
 
+	// Dispatch to the appropriate deserializer based on the "type" field.
+	// Each case creates the corresponding expression type and deserializes the full JSON into it.
+	// The raw bytes contain all fields needed by the specific expression type's UnmarshalJSON method.
 	switch aux.Type {
 	case "string":
 		var expr String
@@ -1691,6 +1713,9 @@ func unmarshalExpression(raw json.RawMessage) (Expression, error) {
 		}
 		return &expr, nil
 	default:
+		// Unknown type: return nil (graceful degradation).
+		// This allows forward compatibility with new expression types.
+		// Callers should handle nil Expression appropriately.
 		return nil, nil
 	}
 }
@@ -1732,10 +1757,14 @@ func unmarshalExpression(raw json.RawMessage) (Expression, error) {
 //   - Invalid JSON format returns parse error
 //   - Module and Assignment's UnmarshalJSON methods may return their own errors
 func unmarshalDefinition(raw json.RawMessage) (Definition, error) {
+	// Early return for empty input to avoid unnecessary JSON parsing.
 	if len(raw) == 0 {
 		return nil, nil
 	}
 
+	// Extract the "type" field to determine if this is an Assignment or Module.
+	// Module is the default (no explicit "type" field needed) because most
+	// definitions in Blueprint files are modules.
 	aux := &struct {
 		Type string `json:"type"`
 	}{}
@@ -1743,6 +1772,9 @@ func unmarshalDefinition(raw json.RawMessage) (Definition, error) {
 		return nil, err
 	}
 
+	// Dispatch based on type field.
+	// - "assignment": Explicit variable assignment (e.g., my_var = "value")
+	// - default: Module definition (most common case, no type field needed)
 	switch aux.Type {
 	case "assignment":
 		var def Assignment
@@ -1751,6 +1783,8 @@ func unmarshalDefinition(raw json.RawMessage) (Definition, error) {
 		}
 		return &def, nil
 	default:
+		// Default to Module: simplifies JSON format for the common case.
+		// Most Blueprint definitions are modules, so omitting "type" reduces noise.
 		var def Module
 		if err := json.Unmarshal(raw, &def); err != nil {
 			return nil, err
@@ -1792,9 +1826,13 @@ func unmarshalDefinition(raw json.RawMessage) (Definition, error) {
 //	pos := scanner.Position{Filename: "test.bp", Line: 10, Column: 5}
 //	str := posToString(pos) // Returns "test.bp:10:5"
 func posToString(pos scanner.Position) string {
+	// Check for zero-value position to avoid serializing meaningless "::0:0".
+	// This happens when position info was not set during parsing.
 	if pos.Filename == "" && pos.Line == 0 && pos.Column == 0 {
 		return ""
 	}
+	// Build "file:line:column" format string using strconv.Itoa for integer conversion.
+	// This format is compatible with stringToPos() for round-trip serialization.
 	return pos.Filename + ":" + strconv.Itoa(pos.Line) + ":" + strconv.Itoa(pos.Column)
 }
 
@@ -1837,11 +1875,17 @@ func posToString(pos scanner.Position) string {
 //	pos := stringToPos("")
 //	// pos = scanner.Position{}
 func stringToPos(s string) scanner.Position {
+	// Empty string indicates missing or zero-value position; return zero-value.
 	if s == "" {
 		return scanner.Position{}
 	}
+	// Split on ":" to extract filename, line, and column.
+	// Note: Filename may contain ":" (e.g., absolute Windows paths), but we only
+	// split on the first two ":" occurrences (parts[0], parts[1], parts[2]).
 	parts := strings.Split(s, ":")
 	if len(parts) >= 3 {
+		// Parse line and column numbers; ignore errors (invalid numbers become 0).
+		// This provides graceful degradation for malformed position strings.
 		line, _ := strconv.Atoi(parts[1])
 		col, _ := strconv.Atoi(parts[2])
 		return scanner.Position{
@@ -1850,5 +1894,6 @@ func stringToPos(s string) scanner.Position {
 			Column:   col,
 		}
 	}
+	// Malformed string (less than 3 parts): return zero-value.
 	return scanner.Position{}
 }

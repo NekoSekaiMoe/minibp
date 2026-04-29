@@ -1,3 +1,26 @@
+// Package build implements the core build pipeline for minibp.
+//
+// It provides the transformation from parsed Blueprint definitions (from .bp files)
+// to Ninja build files through a multi-stage pipeline:
+//
+//  1. Definition Collection: Extract all modules, assignments, and namespaces from parsed files
+//  2. Variable Processing: Evaluate and register variable assignments for ${var} substitution
+//  3. Module Collection: Filter enabled modules, resolve properties, expand globs, merge variants
+//  4. Namespace Resolution: Build namespace map for soong_namespace cross-module references
+//  5. Dependency Graph: Construct directed graph and perform topological sort
+//  6. Ninja Generation: Create build rules, variables, and write build.ninja
+//
+// The package supports:
+//   - Incremental builds via caching of parsed ASTs
+//   - Architecture variants (host/target, 32/64-bit, cross-compilation)
+//   - Soong-style Blueprint syntax with select() expressions
+//   - Custom toolchain configuration (CC, CXX, AR, LTO, sysroot, ccache)
+//
+// Key entry points:
+//   - GenerateFromBuildJSON: Convert merged BuildJSON to build.ninja (incremental pipeline)
+//   - CollectModulesWithNames: Extract and resolve module definitions
+//   - BuildGraph: Construct dependency graph for topological sorting
+//   - NewGenerator: Create Ninja generator with build rules
 package build
 
 import (

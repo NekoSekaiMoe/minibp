@@ -160,38 +160,6 @@ soong_namespace {
 # //vendor:lib resolves via namespace
 ```
 
-## Project Structure
-
-```
-minibp/
-├── cmd/minibp/         # CLI entry point
-├── lib/
-│   ├── parser/         # Blueprint lexer, parser, AST, evaluator
-│   │   ├── ast.go      # AST definitions (Module, Select, Unset, etc.)
-│   │   ├── lexer.go    # Tokenizer (IDENT, STRING, UNSET, AT, etc.)
-│   │   ├── parser.go   # Recursive descent parser
-│   │   └── eval.go     # Evaluator (select, operators, variables, strict mode)
-│   ├── module/         # Module type registry & factories
-│   ├── dag/            # DAG dependency graph & topological sort
-│   ├── ninja/          # Ninja generator & rules
-│   │   ├── gen.go      # Build file generation
-│   │   ├── rules.go    # Build rule interfaces, ApplyDefaults, module references
-│   │   ├── writer.go   # Ninja output writer
-│   │   ├── cc.go       # C/C++ rules (cc_library, cc_binary, cc_test, etc.)
-│   │   ├── go.go       # Go rules (go_library, go_binary, etc.)
-│   │   ├── java.go     # Java rules (java_library, java_binary, etc.)
-│   │   ├── filegroup.go # File group rules
-│   │   ├── custom.go   # Custom and proto rules
-│   │   ├── defaults.go # Defaults, package, soong_namespace, phony, sh/python rules
-│   │   └── helpers.go  # Property extraction helpers
-│   ├── toolchain/      # Compiler/toolchain configuration
-│   ├── errors/         # Error handling
-│   ├── hasher/         # File hashing
-│   ├── dependency/     # Dependency resolution
-│   └── version/        # Version info
-└── examples/           # Example build files
-```
-
 ## Building
 
 ```bash

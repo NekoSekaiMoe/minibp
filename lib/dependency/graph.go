@@ -443,6 +443,8 @@ func (g *DependencyGraph) topologicalSort() ([]string, error) {
 
 	// Step 1: Initialize in-degree map.
 	// Each module starts with in-degree 0; we'll count dependencies next.
+	// In-degree represents the number of direct dependencies a module has.
+	// A module with in-degree 0 has no dependencies and can be built first.
 	inDegree := make(map[string]int)
 
 	for name := range g.modules {
@@ -454,6 +456,8 @@ func (g *DependencyGraph) topologicalSort() ([]string, error) {
 	// Step 2: Calculate in-degrees (dependency count).
 	// A module's in-degree = number of direct dependencies it has.
 	// This is simply the length of its edges list.
+	// In Kahn's algorithm, we process modules with in-degree 0 first,
+	// then decrement in-degree of their dependents as we process them.
 	for name := range g.modules {
 
 		inDegree[name] = len(g.edges[name])
@@ -485,23 +489,34 @@ func (g *DependencyGraph) topologicalSort() ([]string, error) {
 	processed := make(map[string]bool)
 
 	// Step 4: Process queue until empty.
+	// This is the main loop of Kahn's algorithm.
+	// In each iteration, we:
+	//   1. Dequeue a module with in-degree 0 (all its dependencies are built)
+	//   2. Add it to the result (build order)
+	//   3. For each module that depends on it, decrement their effective in-degree
+	//   4. When a dependent's in-degree reaches 0, add it to the queue
+	// For simplicity, we recalculate readiness by checking if all dependencies are processed.
 	for len(queue) > 0 {
 
 		// Dequeue first element (FIFO).
+		// We use slice indexing to get the first element and reslice to remove it.
 		node := queue[0]
 
 		queue = queue[1:]
 
 		// Add to result and mark processed.
+		// Once a module is in result, all its dependencies are guaranteed to be built.
 		result = append(result, node)
 
 		processed[node] = true
 
 		// Find modules that depend on this node.
 		// A module can be added to queue when all its dependencies are processed.
+		// We iterate through all edges to find modules that have this node as a dependency.
 		for moduleName, deps := range g.edges {
 
 			// Skip already processed modules.
+			// Once processed, a module should never be processed again.
 			if processed[moduleName] {
 
 				continue
@@ -509,6 +524,7 @@ func (g *DependencyGraph) topologicalSort() ([]string, error) {
 			}
 
 			// Check if this module depends on the current node.
+			// We need to find if node is in deps (the module's dependency list).
 			hasDep := false
 
 			for _, dep := range deps {
@@ -527,6 +543,7 @@ func (g *DependencyGraph) topologicalSort() ([]string, error) {
 
 				// Check if all dependencies are now processed.
 				// A module is ready when every dependency appears in processed.
+				// We check all deps except the current node (which we just processed).
 				allProcessed := true
 
 				for _, dep := range g.edges[moduleName] {
@@ -542,9 +559,11 @@ func (g *DependencyGraph) topologicalSort() ([]string, error) {
 				}
 
 				// Add to queue if ready and not already queued.
+				// We check for duplicates to avoid processing the same module twice.
 				if allProcessed {
 
 					// Check if already in queue to avoid duplicates.
+					// Duplicate entries would cause the module to appear twice in result.
 					found := false
 
 					for _, q := range queue {
@@ -564,6 +583,7 @@ func (g *DependencyGraph) topologicalSort() ([]string, error) {
 						queue = append(queue, moduleName)
 
 						// Re-sort to maintain alphabetical ordering.
+						// This ensures deterministic output across runs.
 						sort.Strings(queue)
 
 					}

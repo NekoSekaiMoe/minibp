@@ -113,29 +113,34 @@ type Manager struct {
 //	}
 //	// mgr is now ready to use, will manage cache under /home/user/myproject/.minibp/
 func NewManager(workDir string) (*Manager, error) {
-	// Construct cache directory and dependency file paths
+	// Construct cache directory and dependency file paths.
+	// jsonDir stores cached ASTs as JSON files for incremental builds.
+	// depFile stores file hashes to detect which .bp files have changed.
 	jsonDir := filepath.Join(workDir, ".minibp", "json")
 	depFile := filepath.Join(workDir, ".minibp", "dep.json")
 
-	// Initialize Manager instance with work directory and cache paths
+	// Initialize Manager instance with work directory and cache paths.
+	// The hashes map starts empty and will be populated from dep.json if it exists.
 	m := &Manager{
 		workDir: workDir,
 		jsonDir: jsonDir,
 		depFile: depFile,
-		hashes:  make(map[string]string),
+		hashes:  make(map[string]string), // Initialize empty hash map to store file hashes for incremental builds
 	}
 
-	// Create .minibp/json/ directory if it doesn't exist
-	// MkdirAll creates all directories in the path that don't exist
+	// Create .minibp/json/ directory if it doesn't exist.
+	// MkdirAll creates all directories in the path that don't exist.
+	// Permission 0755 allows owner read/write/execute, others read/execute.
 	if err := os.MkdirAll(jsonDir, 0755); err != nil {
 		return nil, fmt.Errorf("create json dir: %w", err)
 	}
 
-	// Attempt to load existing dependency file
-	// If file doesn't exist or is corrupted, don't return error; start fresh (clear hashes)
+	// Attempt to load existing dependency file.
+	// If file doesn't exist or is corrupted, don't return error; start fresh (clear hashes).
+	// This ensures the build won't fail even if the cache is corrupted or missing.
 	if err := m.loadDepFile(); err != nil {
-		// If dep.json doesn't exist or has invalid format, start fresh
-		// This ensures build won't fail even if cache is corrupted
+		// If dep.json doesn't exist or has invalid format, start fresh.
+		// This ensures build won't fail even if cache is corrupted.
 		m.hashes = make(map[string]string)
 	}
 
@@ -168,21 +173,24 @@ func NewManager(workDir string) (*Manager, error) {
 //	  }
 //	}
 func (m *Manager) loadDepFile() error {
-	// Read raw content of dep.json file
+	// Read raw content of dep.json file.
+	// Returns error if file doesn't exist or cannot be read.
 	data, err := os.ReadFile(m.depFile)
 	if err != nil {
 		return err
 	}
 
-	// Parse JSON content into DepFile struct
+	// Parse JSON content into DepFile struct.
+	// Returns error if JSON format is invalid or missing required fields.
 	var dep DepFile
 	if err := json.Unmarshal(data, &dep); err != nil {
 		return err
 	}
 
-	// Copy loaded hash values into memory
+	// Copy loaded hash values into memory.
 	m.hashes = dep.Hashes
-	// Handle case where Hashes is null (JSON "hashes": null)
+	// Handle case where Hashes is null (JSON "hashes": null).
+	// JSON unmarshaling sets map to nil when the JSON value is null.
 	if m.hashes == nil {
 		m.hashes = make(map[string]string)
 	}
@@ -216,17 +224,20 @@ func (m *Manager) loadDepFile() error {
 //	  }
 //	}
 func (m *Manager) SaveDepFile() error {
-	// 构造 DepFile 结构体，准备序列化
+	// Construct DepFile struct with current hash values for serialization.
+	// Version is set to 1; this allows future format changes with backward compatibility.
 	dep := DepFile{
 		Version: 1,
 		Hashes:  m.hashes,
 	}
-	// 序列化为格式化的 JSON（使用两个空格缩进）
+	// Serialize to formatted JSON using two-space indentation.
+	// MarshalIndent produces human-readable JSON for debugging and version control.
 	data, err := json.MarshalIndent(dep, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal dep file: %w", err)
 	}
-	// 写入 dep.json 文件，权限 0644
+	// Write dep.json file with 0644 permissions (owner read/write, others read-only).
+	// Overwrites existing file if present; creates new file if not.
 	return os.WriteFile(m.depFile, data, 0644)
 }
 
@@ -258,21 +269,26 @@ func (m *Manager) SaveDepFile() error {
 //	}
 //	fmt.Println(hash) // Output similar to: a1b2c3d4e5f6...
 func (m *Manager) hashFile(path string) (string, error) {
-	// 打开文件用于读取
+	// Open file for reading.
+	// Returns error if file doesn't exist or lacks read permissions.
 	f, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("open file for hash: %w", err)
 	}
-	// 确保文件在函数返回前关闭
+	// Ensure file is closed when function returns.
+	// Using defer ensures closure even if errors occur during reading.
 	defer f.Close()
 
-	// 初始化 SHA256 哈希计算器
+	// Initialize SHA256 hash calculator.
+	// The hash is computed incrementally as data is streamed to it.
 	h := sha256.New()
-	// 流式复制文件内容到哈希计算器
+	// Stream file content to hash calculator.
+	// io.Copy reads from file and writes to hash, computing digest incrementally.
 	if _, err := io.Copy(h, f); err != nil {
 		return "", fmt.Errorf("hash file content: %w", err)
 	}
-	// 计算最终的哈希值并格式化为十六进制字符串
+	// Compute final hash value and format as lowercase hex string (64 chars).
+	// Sum(nil) finalizes the hash and returns the digest bytes.
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
@@ -316,29 +332,33 @@ func (m *Manager) hashFile(path string) (string, error) {
 //	    cached, _ := mgr.LoadJSON("src/foo/Android.bp")
 //	}
 func (m *Manager) NeedsReparse(bpFile string) (bool, error) {
-	// 计算文件的当前哈希值
+	// Compute current hash value of the file.
+	// This is used to detect if the file content has changed since last build.
 	currentHash, err := m.hashFile(bpFile)
 	if err != nil {
-		// 哈希计算失败，保守地认为需要重新解析
+		// Hash computation failed; conservatively assume reparse is needed.
+		// This ensures we don't use stale cache when file can't be read.
 		return true, fmt.Errorf("hash %s: %w", bpFile, err)
 	}
 
-	// 检查是否有存储的哈希值
+	// Check if we have a stored hash value for this file.
+	// If not, this is the first time we're seeing this file.
 	storedHash, exists := m.hashes[bpFile]
 	if !exists {
-		// 首次看到这个文件，记录哈希值并返回需要解析
+		// First time seeing this file; record hash and signal reparse needed.
+		// The actual parsing will happen in the caller.
 		m.hashes[bpFile] = currentHash
 		return true, nil
 	}
 
-	// 比较哈希值是否相同
+	// Compare stored hash with current hash to detect changes.
 	if storedHash != currentHash {
-		// 文件已改变，更新哈希值并返回需要解析
+		// File has changed; update hash and signal reparse needed.
 		m.hashes[bpFile] = currentHash
 		return true, nil
 	}
 
-	// 文件未改变，可以使用缓存
+	// File unchanged; cache can be used (caller should call LoadJSON).
 	return false, nil
 }
 
@@ -370,17 +390,18 @@ func (m *Manager) NeedsReparse(bpFile string) (bool, error) {
 //	mgr.jsonFilePath("src/bar.bp")
 //	// Returns: /home/user/project/.minibp/json/src__bar.bp.json
 func (m *Manager) jsonFilePath(bpFile string) string {
-	// 尝试获取相对于工作目录的路径，保证缓存键的稳定性
-	// 这样即使工作目录改变，只要相对路径相同就能命中缓存
+	// Try to get the path relative to work directory for cache key stability.
+	// This ensures cache hits even if the absolute path changes but relative path stays the same.
 	rel, err := filepath.Rel(m.workDir, bpFile)
 	if err != nil {
-		// 如果无法计算相对路径（如在不同驱动器上），使用原始路径
+		// Cannot compute relative path (e.g., different drives on Windows); use original path.
 		rel = bpFile
 	}
-	// 将路径分隔符替换为 __，避免目录遍历问题
+	// Replace path separators with __ to avoid directory traversal issues in filenames.
+	// This ensures the cache filename is safe across different operating systems.
 	sanitized := strings.ReplaceAll(rel, string(filepath.Separator), "__")
 	sanitized = strings.ReplaceAll(sanitized, "/", "__")
-	// 拼接最终路径：.minibp/json/清理后的文件名.json
+	// Construct final cache path: .minibp/json/<sanitized_name>.json
 	return filepath.Join(m.jsonDir, sanitizeName(sanitized)+".json")
 }
 
@@ -418,9 +439,11 @@ func (m *Manager) jsonFilePath(bpFile string) string {
 //	sanitizeName("normal_file.bp")
 //	// Returns: normal_file.bp (no change)
 func sanitizeName(name string) string {
-	// 使用 strings.Map 遍历每个字符并进行替换
+	// Use strings.Map to iterate over each character and apply replacement.
+	// This approach handles Unicode characters correctly via rune iteration.
 	result := strings.Map(func(r rune) rune {
-		// 检查是否为需要替换的特殊字符
+		// Check if character is a special character that needs replacement.
+		// These characters can cause issues with file paths on various operating systems.
 		if r == '/' || r == '\\' || r == ':' || r == '*' || r == '?' || r == '"' || r == '<' || r == '>' || r == '|' {
 			return '_'
 		}
@@ -460,16 +483,17 @@ func sanitizeName(name string) string {
 //	    fmt.Fprintf(os.Stderr, "warning: failed to cache: %v\n", err)
 //	}
 func (m *Manager) SaveJSON(bpFile string, file *parser.File) error {
-	// 获取缓存文件的路径
+	// Get the cache file path for this .bp file.
 	jsonPath := m.jsonFilePath(bpFile)
 
-	// 将 AST 序列化为格式化的 JSON（使用两个空格缩进）
+	// Serialize the AST to formatted JSON with two-space indentation.
+	// This produces human-readable JSON for debugging and version control.
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal ast to json: %w", err)
 	}
 
-	// 写入缓存文件
+	// Write the serialized AST to the cache file with 0644 permissions.
 	return os.WriteFile(jsonPath, data, 0644)
 }
 
@@ -508,18 +532,20 @@ func (m *Manager) SaveJSON(bpFile string, file *parser.File) error {
 //	    processFile(cached)
 //	}
 func (m *Manager) LoadJSON(bpFile string) (*parser.File, error) {
-	// 获取缓存文件的路径
+	// Get the cache file path for this .bp file.
 	jsonPath := m.jsonFilePath(bpFile)
 
-	// 尝试读取缓存文件
+	// Try to read the cache file.
+	// A missing file is not an error; it just means cache miss.
 	data, err := os.ReadFile(jsonPath)
 	if err != nil {
-		// 缓存未命中（文件不存在），这不是错误
-		// 调用方应该重新解析该文件
+		// Cache miss (file doesn't exist); this is not an error.
+		// Caller should reparse the file and call SaveJSON to cache it.
 		return nil, nil
 	}
 
-	// 反序列化 JSON 到 parser.File 结构体
+	// Deserialize JSON content back into parser.File struct.
+	// Returns error if JSON format is invalid or doesn't match the struct.
 	var file parser.File
 	if err := json.Unmarshal(data, &file); err != nil {
 		return nil, fmt.Errorf("unmarshal cached ast: %w", err)
@@ -564,12 +590,14 @@ func (m *Manager) LoadJSON(bpFile string) (*parser.File, error) {
 //	// Remember to persist
 //	mgr.SaveDepFile()
 func (m *Manager) UpdateHash(bpFile string) error {
-	// 计算文件的当前哈希值
+	// Compute current hash value of the file.
+	// This recomputes the hash even if the file hasn't changed.
 	hash, err := m.hashFile(bpFile)
 	if err != nil {
 		return err
 	}
-	// 更新内存中的哈希值
+	// Update the in-memory hash value for this file.
+	// Note: This does not persist to disk; call SaveDepFile() to persist.
 	m.hashes[bpFile] = hash
 	return nil
 }
